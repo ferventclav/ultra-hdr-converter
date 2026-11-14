@@ -9,11 +9,6 @@ photos look as before.
 
 There are no settings. Version 1.0, package `com.example.ultrahdr`. Built for a Samsung Galaxy
 running One UI, and it should work on any Android 14 phone that shows Ultra HDR photos.
-
-Version 1.0 is the first public build. Before it, the app went through private builds numbered up
-to 2.4, and the code and tests still name two of them: version 1.9, whose gain map method is kept,
-and version 2.0, whose lossless output gets converted again.
-
 ## What happens to a photo
 
 An Ultra HDR photo is a JPEG with a small grey picture stored behind it, called a gain map. White
@@ -24,7 +19,6 @@ for a photo that has none and saves the photo again with it.
 | --- | --- |
 | JPEG stored on the phone | Updated where it is. Same file, same place in Gallery. |
 | Already HDR (camera or another app) | Skipped, never touched. |
-| HDR added by version 2.0 of this app | Its gain map is taken out and the photo is converted again. |
 | No bright highlights | Skipped, because nothing would change. |
 | Cloud photo | An HDR copy is saved to `Pictures/UltraHDR`. |
 | Not a JPEG, motion photo, over 26 MP, or the real file can't be found | Left alone, with the reason on the result screen. |
@@ -38,16 +32,13 @@ through one.
 
 ## The gain map
 
-`GainMapSynth` (plain Kotlin, no Android code) is version 1.9's method, kept exactly because it is
-the one that was judged on a real phone:
+`GainMapSynth` (plain Kotlin, no Android code):
 
 - plain brightness decides everything; colour, however saturated, never counts as a highlight
 - the boost starts at the photo's own 85th percentile, and never below a floor that keeps skin
   and midtones out of it
 - it rises steeply, so only the top of the range moves
 - the map is worked out at up to 1280 px on the long side; nothing is blurred
-
-`V19ParityTest` checks the output against version 1.9's own code, gain byte for gain byte.
 
 ## Permissions
 
@@ -67,7 +58,7 @@ app/src/main/java/com/example/ultrahdr/
     SaveDecision.kt            in place, copy or leave alone, and the Copy report text
     GainMapSynth.kt            which parts get brighter, and by how much
     UltraHdrEngine.kt          decoding, attaching the gain map, the decoder check
-    UltraHdrContainer.kt       reading a JPEG's layout; taking out version 2.0's gain map
+    UltraHdrContainer.kt       reading a JPEG's layout
     MediaStoreSaver.kt         finding the real file, safe in-place writes, saving copies
     RecoveryStore.kt           the backup that survives a crash mid-write
     ImageExifHelper.kt         upright decoding, capture date, EXIF copy
@@ -96,9 +87,8 @@ gradle testDebugUnitTest -Pscreenshots    # also saves every screen as a PNG in 
 
 The tests run on a PC through Robolectric, with Android's real picture decoder:
 
-- `GainMapSynthTest`, `V19ParityTest`: the look, and that it matches version 1.9 exactly
-- `ConversionRulesTest`: where each kind of photo goes, HDR detection, taking out version 2.0's
-  gain map, GPS kept after conversion, the Copy report
+- `GainMapSynthTest`, `V19ParityTest`: the gain map
+- `ConversionRulesTest`: where each kind of photo goes, HDR detection, GPS, the Copy report
 - `UltraHdrContainerTest`: reading JPEG layouts and refusing odd files
 - `ScreensTest`: every screen at phone, tablet, sideways and large-text sizes, light and dark
 - `ResultSummaryTest`, `LogicTest`: wording, MPF and detection checks
