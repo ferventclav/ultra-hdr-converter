@@ -74,7 +74,7 @@ class ScreensTest {
     fun start() = screen("01_start", UiState(updatesWithoutAsking = true)) {
         compose.onNodeWithText("Select photos").assertIsDisplayed()
         compose.onNodeWithText("Ultra HDR").assertIsDisplayed()
-        compose.onNodeWithText("No photos").assertIsDisplayed()
+        compose.onNodeWithText("No photos selected.").assertIsDisplayed()
         compose.onAllNodesWithText("Stop edit prompts").assertCountEquals(0)
     }
 

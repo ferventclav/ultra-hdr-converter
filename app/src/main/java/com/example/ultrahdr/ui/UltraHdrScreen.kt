@@ -76,8 +76,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -93,7 +98,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.example.ultrahdr.processing.PhotoResult
-import com.example.ultrahdr.ui.theme.OneUiBlue
 import com.example.ultrahdr.ui.theme.UhdrTheme
 
 /** Everything the screen can ask for. Keeps the screen itself free of the view model, so it can be drawn in tests. */
@@ -248,8 +252,9 @@ fun UltraHdrScreen(
         val headerHeight = (maxHeight * 0.34f).coerceIn(210.dp, 330.dp)
         val headerPx = with(LocalDensity.current) { headerHeight.toPx() }
         val screenWidth = maxWidth
-        // The empty state fills what is left between the header and the toolbar, so its text sits in the middle of that space.
-        val emptyHeight = (maxHeight - statusTop - headerHeight - 6.dp - navBottom - BAR_ROOM).coerceAtLeast(96.dp)
+        // The empty screen has no enlarged header: its title sits in the middle, as on One UI's Software update page.
+        val empty = state.phase is Phase.Idle && state.photos.isEmpty()
+        val emptyHeight = (maxHeight - statusTop - navBottom - BAR_ROOM).coerceAtLeast(240.dp)
         val collapsed by remember(headerPx) {
             derivedStateOf { grid.firstVisibleItemIndex > 0 || grid.firstVisibleItemScrollOffset > headerPx * 0.6f }
         }
@@ -272,10 +277,10 @@ fun UltraHdrScreen(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                wide("header") { ExpandedHeader(heading, headerHeight, screenWidth) }
+                if (!empty) wide("header") { ExpandedHeader(heading, headerHeight, screenWidth) }
                 state.notice?.let { notice -> wide("notice") { NoticeCard(notice, actions.dismissNotice) } }
-                if (state.phase is Phase.Idle && state.photos.isEmpty()) {
-                    emptyState(state, actions, emptyHeight)
+                if (empty) {
+                    emptyState(state, actions, emptyHeight, screenWidth)
                 } else {
                     photoPage(state, actions, thumbnail)
                 }
@@ -381,7 +386,7 @@ private fun NoticeCard(notice: Notice, onDismiss: () -> Unit) {
             Icon(
                 imageVector = if (notice.isError) Icons.Rounded.ErrorOutline else Icons.Rounded.Info,
                 contentDescription = null,
-                tint = if (notice.isError) UhdrTheme.colors.danger else OneUiBlue,
+                tint = if (notice.isError) UhdrTheme.colors.danger else UhdrTheme.colors.accent,
                 modifier = Modifier.size(24.dp)
             )
             Spacer(Modifier.width(20.dp))
@@ -403,27 +408,68 @@ private fun NoticeCard(notice: Notice, onDismiss: () -> Unit) {
 // ----------------------------------------------------------------------------------------------
 
 /**
- * One UI's empty list: one grey line in the middle of the page, as Samsung Notes or My Files show
- * it. The only extra is a way back to media management, and only while it is off.
+ * Built like One UI 9's Software update page: the app's name large in the accent colour in the
+ * middle of the screen, one status line under it, and a soft blue and amber light behind. The only
+ * extra is a way back to media management, and only while it is off.
  */
-private fun LazyGridScope.emptyState(state: UiState, actions: ScreenActions, height: Dp) {
+private fun LazyGridScope.emptyState(state: UiState, actions: ScreenActions, height: Dp, screenWidth: Dp) {
     wide("empty") {
+        val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+        val titleSize = (screenWidth.value * 0.11f).coerceIn(34f, 46f).sp
         Column(
-            modifier = Modifier.fillMaxWidth().height(height).padding(horizontal = 24.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(height)
+                .drawBehind { glow(dark) }
+                .padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "No photos",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Normal),
-                color = UhdrTheme.colors.textSecondary,
+                text = "Ultra HDR",
+                style = MaterialTheme.typography.displaySmall.copy(fontSize = titleSize, lineHeight = titleSize * 1.15f),
+                color = UhdrTheme.colors.accentInk,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.semantics { heading() }
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "No photos selected.",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
                 textAlign = TextAlign.Center
             )
             if (!state.updatesWithoutAsking) {
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(24.dp))
                 TonalButton(text = "Stop edit prompts", onClick = actions.turnOnMediaManagement, height = 44.dp)
             }
         }
+    }
+}
+
+/** Two soft pools of light behind the title: blue above right, amber below left. */
+private fun DrawScope.glow(dark: Boolean) {
+    val w = size.width
+    val r = w * 0.48f
+    fun pool(color: Color, alpha: Float, at: Offset) = drawCircle(
+        brush = Brush.radialGradient(
+            0f to color.copy(alpha = alpha),
+            0.55f to color.copy(alpha = alpha * 0.45f),
+            1f to color.copy(alpha = 0f),
+            center = at,
+            radius = r
+        ),
+        radius = r,
+        center = at
+    )
+    val blueAt = center + Offset(w * 0.07f, -w * 0.20f)
+    val amberAt = center + Offset(-w * 0.09f, w * 0.22f)
+    if (dark) {
+        pool(Color(0xFF2F55C8), 0.42f, blueAt)
+        pool(Color(0xFFC0682E), 0.34f, amberAt)
+    } else {
+        pool(Color(0xFF7FA2FF), 0.30f, blueAt)
+        pool(Color(0xFFFFA25E), 0.28f, amberAt)
     }
 }
 
@@ -463,8 +509,8 @@ private fun SummaryCard(summary: Summary, onCopyReport: () -> Unit) {
         summary.lines.forEachIndexed { index, line ->
             if (index > 0) RowDivider()
             val (icon, tint) = when (line.kind) {
-                LineKind.UPDATED -> Icons.Rounded.CheckCircle to OneUiBlue
-                LineKind.COPIED -> Icons.Rounded.ContentCopy to OneUiBlue
+                LineKind.UPDATED -> Icons.Rounded.CheckCircle to UhdrTheme.colors.accent
+                LineKind.COPIED -> Icons.Rounded.ContentCopy to UhdrTheme.colors.accent
                 LineKind.SKIPPED -> Icons.Rounded.RemoveCircleOutline to UhdrTheme.colors.textSecondary
                 LineKind.FAILED -> Icons.Rounded.ErrorOutline to UhdrTheme.colors.danger
                 LineKind.NOT_STARTED -> Icons.Rounded.Block to UhdrTheme.colors.textSecondary
@@ -581,13 +627,13 @@ private fun ProgressRow(label: String, progress: Float?, action: String, onActio
             Spacer(Modifier.height(8.dp))
             val rail = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape)
             if (progress == null) {
-                LinearProgressIndicator(modifier = rail, color = OneUiBlue, trackColor = UhdrTheme.colors.rail, gapSize = 0.dp)
+                LinearProgressIndicator(modifier = rail, color = UhdrTheme.colors.accent, trackColor = UhdrTheme.colors.rail, gapSize = 0.dp)
             } else {
                 val shown by animateFloatAsState(progress, tween(300, easing = OneUiEasing), label = "progress")
                 LinearProgressIndicator(
                     progress = { shown },
                     modifier = rail,
-                    color = OneUiBlue,
+                    color = UhdrTheme.colors.accent,
                     trackColor = UhdrTheme.colors.rail,
                     // One plain rail, without the gap and end dot newer Material adds.
                     gapSize = 0.dp,
@@ -652,11 +698,11 @@ fun PromptCard(blurred: Boolean, onTurnOn: () -> Unit, onNotNow: () -> Unit, mod
         Spacer(Modifier.height(14.dp))
         Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onNotNow, modifier = Modifier.weight(1f).fillMaxHeight()) {
-                Text("Not now", style = MaterialTheme.typography.labelLarge, color = OneUiBlue)
+                Text("Not now", style = MaterialTheme.typography.labelLarge, color = UhdrTheme.colors.accentInk)
             }
             VerticalDivider(Modifier.height(20.dp), thickness = 1.dp, color = UhdrTheme.colors.hairline)
             TextButton(onClick = onTurnOn, modifier = Modifier.weight(1f).fillMaxHeight()) {
-                Text("Settings", style = MaterialTheme.typography.labelLarge, color = OneUiBlue)
+                Text("Settings", style = MaterialTheme.typography.labelLarge, color = UhdrTheme.colors.accentInk)
             }
         }
     }

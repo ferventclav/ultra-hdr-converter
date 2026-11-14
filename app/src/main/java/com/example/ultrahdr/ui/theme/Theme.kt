@@ -1,5 +1,6 @@
 package com.example.ultrahdr.ui.theme
 
+import android.content.Context
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -10,7 +11,10 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -85,16 +89,62 @@ private val UhdrShapes = Shapes(
 @Composable
 fun UltraHdrTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    wallpaperColours: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    CompositionLocalProvider(LocalUhdrColors provides if (darkTheme) DarkUhdrColors else LightUhdrColors) {
+    val context = LocalContext.current
+    val colors = remember(context, darkTheme, wallpaperColours) {
+        val stock = if (darkTheme) DarkUhdrColors else LightUhdrColors
+        if (wallpaperColours) wallpaperAccent(context, darkTheme, stock) else stock
+    }
+    val scheme = (if (darkTheme) OneUiDarkColorScheme else OneUiLightColorScheme)
+        .copy(primary = colors.accent, onPrimary = colors.onAccent, primaryContainer = colors.accentTint)
+    CompositionLocalProvider(LocalUhdrColors provides colors) {
         MaterialTheme(
-            colorScheme = if (darkTheme) OneUiDarkColorScheme else OneUiLightColorScheme,
+            colorScheme = scheme,
             typography = UhdrTypography,
             shapes = UhdrShapes,
             content = content
         )
     }
+}
+
+/**
+ * One UI's Colour palette: the accent follows the wallpaper, as Samsung's own apps do. The shades
+ * are the ones his One UI design system lists. Light: accent1 600 for fills, 700 for text, 100 for
+ * tints. Dark: accent1 200 for fills and text, 800 on fills and as the tint. If any of those pairs
+ * reads under 4.5:1, the stock One UI blue stays.
+ */
+private fun wallpaperAccent(context: Context, dark: Boolean, stock: UhdrColors): UhdrColors {
+    fun shade(id: Int) = Color(context.getColor(id))
+    val mine = try {
+        if (dark) {
+            val fill = shade(android.R.color.system_accent1_200)
+            val deep = shade(android.R.color.system_accent1_800)
+            stock.copy(accent = fill, onAccent = deep, accentInk = fill, accentTint = deep)
+        } else {
+            stock.copy(
+                accent = shade(android.R.color.system_accent1_600),
+                onAccent = Color.White,
+                accentInk = shade(android.R.color.system_accent1_700),
+                accentTint = shade(android.R.color.system_accent1_100)
+            )
+        }
+    } catch (_: Exception) {
+        return stock
+    }
+    val page = if (dark) OneUiDarkBg else OneUiLightBg
+    val readable = contrast(mine.onAccent, mine.accent) >= 4.5f &&
+        contrast(mine.accentInk, mine.accentTint) >= 4.5f &&
+        contrast(mine.accentInk, page) >= 4.5f
+    return if (readable) mine else stock
+}
+
+/** WCAG contrast ratio between two colours, 1 to 21. */
+internal fun contrast(a: Color, b: Color): Float {
+    val la = a.luminance()
+    val lb = b.luminance()
+    return (maxOf(la, lb) + 0.05f) / (minOf(la, lb) + 0.05f)
 }
 
 /** Shortcut: `UhdrTheme.colors.textSecondary`. */

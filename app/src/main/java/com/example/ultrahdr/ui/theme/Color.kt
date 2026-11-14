@@ -29,9 +29,13 @@ val OneUiLightAccentTint = Color(0xFFE5EDFF)
  */
 @Immutable
 data class UhdrColors(
+    /** Fills that mean "act here" or "done": the main button, progress, ticks, row icons. */
+    val accent: Color,
+    /** Text and icons on [accent]. */
+    val onAccent: Color,
     val textSecondary: Color,
     val hairline: Color,
-    /** Text on a tonal button: the One UI blue, deepened or lightened to read on its tint. */
+    /** Accent-coloured text: on a tonal button, on the page, on glass. */
     val accentInk: Color,
     val accentTint: Color,
     val success: Color,
@@ -48,6 +52,8 @@ data class UhdrColors(
 )
 
 val LightUhdrColors = UhdrColors(
+    accent = OneUiBlue,
+    onAccent = Color.White,
     textSecondary = Color(0xFF6C6C72),
     hairline = Color(0x14000000),
     accentInk = Color(0xFF2E6BEB),
@@ -62,6 +68,8 @@ val LightUhdrColors = UhdrColors(
 )
 
 val DarkUhdrColors = UhdrColors(
+    accent = OneUiBlue,
+    onAccent = Color.White,
     textSecondary = Color(0xFF9D9DA3),
     hairline = Color(0x17FFFFFF),
     accentInk = Color(0xFF6E9DFF),

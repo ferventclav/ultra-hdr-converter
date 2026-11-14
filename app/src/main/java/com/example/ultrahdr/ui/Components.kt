@@ -55,7 +55,6 @@ import coil.request.ImageRequest
 import com.example.ultrahdr.processing.Outcome
 import com.example.ultrahdr.processing.PhotoItem
 import com.example.ultrahdr.processing.PhotoResult
-import com.example.ultrahdr.ui.theme.OneUiBlue
 import com.example.ultrahdr.ui.theme.UhdrTheme
 
 /** One UI's standard motion curve. */
@@ -98,7 +97,7 @@ fun InfoRow(
     title: String,
     info: String?,
     modifier: Modifier = Modifier,
-    iconTint: Color = OneUiBlue,
+    iconTint: Color = UhdrTheme.colors.accent,
     trailing: (@Composable () -> Unit)? = null
 ) {
     Row(
@@ -156,7 +155,7 @@ fun PrimaryButton(
     Button(
         onClick = onClick,
         shape = CircleShape,
-        colors = ButtonDefaults.buttonColors(containerColor = OneUiBlue, contentColor = Color.White),
+        colors = ButtonDefaults.buttonColors(containerColor = UhdrTheme.colors.accent, contentColor = UhdrTheme.colors.onAccent),
         contentPadding = PaddingValues(horizontal = 24.dp),
         interactionSource = interaction,
         elevation = null,
@@ -242,10 +241,10 @@ fun PhotoTile(
         val badge = Modifier.align(Alignment.BottomStart).padding(6.dp)
         when (result?.outcome) {
             Outcome.UPDATED, Outcome.COPIED -> Box(
-                modifier = badge.size(22.dp).background(OneUiBlue, CircleShape),
+                modifier = badge.size(22.dp).background(UhdrTheme.colors.accent, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Rounded.Check, contentDescription = "Converted", tint = Color.White, modifier = Modifier.size(15.dp))
+                Icon(Icons.Rounded.Check, contentDescription = "Converted", tint = UhdrTheme.colors.onAccent, modifier = Modifier.size(15.dp))
             }
             Outcome.ALREADY_HDR -> TileChip("HDR", badge)
             Outcome.NO_HIGHLIGHTS -> TileChip("Skipped", badge)
