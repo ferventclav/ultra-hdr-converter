@@ -197,6 +197,7 @@ fun PhotoTile(
                 }
                 Outcome.ALREADY_HDR -> TileChip("HDR", badge)
                 Outcome.NO_HIGHLIGHTS -> TileChip("Skipped", badge)
+                Outcome.LEFT_ALONE -> TileChip("Left alone", badge)
                 Outcome.FAILED -> TileChip("Failed", badge, color = UhdrTheme.colors.danger)
             }
             state == TileState.IDLE && item.alreadyHdr -> TileChip("HDR", badge)

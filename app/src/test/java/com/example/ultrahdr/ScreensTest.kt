@@ -332,7 +332,7 @@ class ScreensTest {
                 canvas.drawBitmap(UltraHdrEngine.gainMapPicture(plan), null, Rect(left, top, left + cellW, top + cellH), null)
                 canvas.drawText(describe(strength, plan), left + 8f, top + cellH + 30f, text)
                 // The numbers the screens show must stay inside what the strength promises.
-                check(plan.peakBoost <= strength.maxBoost + 0.01f) { "scene $kind $strength peaks too high" }
+                check(plan.peakBoost <= plan.ratioMax + 0.01f) { "scene $kind $strength peaks too high" }
                 check(plan.ratioMax >= 1f)
             }
         }

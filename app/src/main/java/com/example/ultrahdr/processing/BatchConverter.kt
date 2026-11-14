@@ -20,7 +20,7 @@ import kotlin.coroutines.coroutineContext
 class BatchConverter(
     private val context: Context,
     /** Checks a finished file. The phone's own decoder by default. */
-    private val verify: (File) -> Boolean = UltraHdrEngine::hasGainMap
+    private val verify: (File) -> Boolean = UltraHdrEngine::decoderSeesGainMap
 ) {
 
     suspend fun convertAll(
