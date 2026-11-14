@@ -71,24 +71,19 @@ class ScreensTest {
     // ---------------------------------------------------------------------------------- start
 
     @Test
-    fun start() = screen("01_start", UiState()) {
+    fun start() = screen("01_start", UiState(updatesWithoutAsking = true)) {
         compose.onNodeWithText("Select photos").assertIsDisplayed()
         compose.onNodeWithText("Ultra HDR").assertIsDisplayed()
+        compose.onNodeWithText("No photos").assertIsDisplayed()
+        compose.onAllNodesWithText("Stop edit prompts").assertCountEquals(0)
     }
 
     @Test
-    fun startDark() = screen("01_start_dark", UiState(), dark = true)
+    fun startDark() = screen("01_start_dark", UiState(updatesWithoutAsking = true), dark = true)
 
     @Test
-    @Config(sdk = [34], qualifiers = TALL)
-    fun startWholePage() = screen("01_start_whole_page", UiState()) {
-        compose.onNodeWithText("Update without being asked").assertIsDisplayed()
-    }
-
-    @Test
-    @Config(sdk = [34], qualifiers = TALL)
-    fun startWithMediaManagementOn() = screen("01_start_whole_page_allowed", UiState(updatesWithoutAsking = true), dark = true) {
-        compose.onAllNodesWithText("Update without being asked").assertCountEquals(0)
+    fun startWithPromptsOn() = screen("01_start_prompts_on", UiState()) {
+        compose.onNodeWithText("Stop edit prompts").assertIsDisplayed()
     }
 
     @Test

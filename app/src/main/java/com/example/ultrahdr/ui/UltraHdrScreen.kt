@@ -52,17 +52,13 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.HdrOn
 import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
-import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -87,6 +83,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -149,9 +146,8 @@ fun UltraHdrApp(viewModel: UltraHdrViewModel) {
         )
     }
 
-    // HDR pictures only show as HDR while the window asks for it: the sunset on the start screen
-    // and the converted photos at the end.
-    val showsHdr = (state.phase is Phase.Idle && state.photos.isEmpty()) || state.phase is Phase.Finished
+    // HDR pictures only show as HDR while the window asks for it: the converted photos at the end.
+    val showsHdr = state.phase is Phase.Finished
     val working = state.phase is Phase.Working
     val view = LocalView.current
     DisposableEffect(showsHdr) {
@@ -214,7 +210,7 @@ internal fun headingFor(state: UiState): Heading {
     val photos = if (count == 1) "1 photo" else "$count photos"
     return when (val phase = state.phase) {
         Phase.Idle -> if (count == 0) {
-            Heading("Ultra HDR", "Brighter highlights for the photos you already have.")
+            Heading("Ultra HDR", "")
         } else {
             Heading("Nothing changed", "Android wasn't allowed to update these photos. Try again and tap Allow.")
         }
@@ -237,8 +233,7 @@ fun UltraHdrScreen(
     state: UiState,
     actions: ScreenActions,
     modifier: Modifier = Modifier,
-    thumbnail: @Composable (Uri, Modifier) -> Unit = { uri, m -> PhotoThumbnail(uri, m) },
-    demo: @Composable (Modifier) -> Unit = { HdrDemo(it) }
+    thumbnail: @Composable (Uri, Modifier) -> Unit = { uri, m -> PhotoThumbnail(uri, m) }
 ) {
     // The page is recorded as it is drawn, so the bars can show a blurred copy of what scrolls under them.
     val backdrop = rememberGlassBackdrop()
@@ -253,6 +248,8 @@ fun UltraHdrScreen(
         val headerHeight = (maxHeight * 0.34f).coerceIn(210.dp, 330.dp)
         val headerPx = with(LocalDensity.current) { headerHeight.toPx() }
         val screenWidth = maxWidth
+        // The empty state fills what is left between the header and the toolbar, so its text sits in the middle of that space.
+        val emptyHeight = (maxHeight - statusTop - headerHeight - 6.dp - navBottom - BAR_ROOM).coerceAtLeast(96.dp)
         val collapsed by remember(headerPx) {
             derivedStateOf { grid.firstVisibleItemIndex > 0 || grid.firstVisibleItemScrollOffset > headerPx * 0.6f }
         }
@@ -278,7 +275,7 @@ fun UltraHdrScreen(
                 wide("header") { ExpandedHeader(heading, headerHeight, screenWidth) }
                 state.notice?.let { notice -> wide("notice") { NoticeCard(notice, actions.dismissNotice) } }
                 if (state.phase is Phase.Idle && state.photos.isEmpty()) {
-                    startPage(state, actions, demo)
+                    emptyState(state, actions, emptyHeight)
                 } else {
                     photoPage(state, actions, thumbnail)
                 }
@@ -338,14 +335,16 @@ private fun ExpandedHeader(words: Heading, height: Dp, screenWidth: Dp) {
                     textAlign = TextAlign.Center,
                     modifier = Modifier.semantics { heading() }
                 )
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = shown.info,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.widthIn(max = 320.dp)
-                )
+                if (shown.info.isNotBlank()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = shown.info,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.widthIn(max = 320.dp)
+                    )
+                }
             }
         }
     }
@@ -400,57 +399,31 @@ private fun NoticeCard(notice: Notice, onDismiss: () -> Unit) {
 }
 
 // ----------------------------------------------------------------------------------------------
-// Start page
+// Empty state
 // ----------------------------------------------------------------------------------------------
 
-private fun LazyGridScope.startPage(state: UiState, actions: ScreenActions, demo: @Composable (Modifier) -> Unit) {
-    wide("demo") {
-        OneUiCard {
-            demo(Modifier)
+/**
+ * One UI's empty list: one grey line in the middle of the page, as Samsung Notes or My Files show
+ * it. The only extra is a way back to media management, and only while it is off.
+ */
+private fun LazyGridScope.emptyState(state: UiState, actions: ScreenActions, height: Dp) {
+    wide("empty") {
+        Column(
+            modifier = Modifier.fillMaxWidth().height(height).padding(horizontal = 24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             Text(
-                text = "On an HDR screen the sun and its path on the water shine brighter than white. Your photos get the same lift.",
-                style = MaterialTheme.typography.bodyMedium,
+                text = "No photos",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Normal),
                 color = UhdrTheme.colors.textSecondary,
-                modifier = Modifier.padding(CardPadding)
+                textAlign = TextAlign.Center
             )
-        }
-    }
-    wide("how") {
-        OneUiCard(Modifier.padding(top = 6.dp)) {
-            CardHeading("How it works")
-            InfoRow(Icons.Rounded.AutoAwesome, "Fully automatic", "Pick photos and each one is converted and saved where it is. No copies.")
-            RowDivider()
-            InfoRow(Icons.Rounded.LocationOn, "Nothing else changes", "Date, location and camera details stay as they were.")
-            RowDivider()
-            InfoRow(Icons.Rounded.HdrOn, "HDR photos are left alone", "Photos your camera saved in HDR are never touched.")
-            Spacer(Modifier.height(6.dp))
-        }
-    }
-    if (!state.updatesWithoutAsking) {
-        wide("prompts") {
-            OneUiCard(Modifier.padding(top = 6.dp)) {
-                InfoRow(
-                    icon = Icons.Rounded.TouchApp,
-                    title = "Update without being asked",
-                    info = "Turn on media management once, and Android stops asking before each batch."
-                )
-                TonalButton(
-                    text = "Turn on",
-                    onClick = actions.turnOnMediaManagement,
-                    height = 44.dp,
-                    modifier = Modifier.padding(start = CardPadding + 44.dp, bottom = CardPadding)
-                )
+            if (!state.updatesWithoutAsking) {
+                Spacer(Modifier.height(20.dp))
+                TonalButton(text = "Stop edit prompts", onClick = actions.turnOnMediaManagement, height = 44.dp)
             }
         }
-    }
-    wide("share") {
-        Text(
-            text = "You can also share photos to Ultra HDR from Gallery.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = UhdrTheme.colors.textSecondary,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 14.dp)
-        )
     }
 }
 
