@@ -1,0 +1,15 @@
+<resources>
+    <!--
+        Only what shows before the first frame is drawn: the launch screen and the window behind it.
+        Everything after that is the Compose theme in ui/theme. The colours match that theme's page
+        background, so the app opens without a white or black flash.
+    -->
+    <style name="Theme.UltraHdrConverter" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/app_background</item>
+        <item name="android:windowSplashScreenBackground">@color/app_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>

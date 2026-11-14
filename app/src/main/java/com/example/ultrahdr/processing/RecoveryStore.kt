@@ -1,0 +1,116 @@
+package com.example.ultrahdr.processing
+
+import android.content.Context
+import android.net.Uri
+import java.io.File
+import java.io.FileOutputStream
+import java.util.UUID
+
+/**
+ * Keeps a private copy of an original photo for the moment it is being overwritten.
+ *
+ * Writing a file in place is not instant. If the app is killed half way, the gallery would be left
+ * with a broken picture. So the original bytes are parked here first, removed once the new file is
+ * fully written, and put back on the next launch if they are still here.
+ */
+internal object RecoveryStore {
+
+    private const val DIR = "recovery"
+
+    class Ticket internal constructor(internal val data: File, internal val meta: File)
+
+    class Report(val restored: Int, val exported: Int) {
+        val any: Boolean get() = restored + exported > 0
+    }
+
+    fun begin(
+        context: Context,
+        original: ByteArray,
+        name: String,
+        target: PhotoTarget,
+        expectedSize: Long
+    ): Ticket {
+        val dir = File(context.filesDir, DIR).apply { mkdirs() }
+        val id = UUID.randomUUID().toString()
+        val data = File(dir, "$id.bin")
+        val meta = File(dir, "$id.txt")
+        FileOutputStream(data).use { out ->
+            out.write(original)
+            out.fd.sync()
+        }
+        // The ticket only counts once this small file exists, so a half-written backup is never used.
+        meta.writeText(
+            listOf(
+                name,
+                target.file?.absolutePath.orEmpty(),
+                target.mediaUri?.toString().orEmpty(),
+                expectedSize.toString()
+            ).joinToString("\n")
+        )
+        return Ticket(data, meta)
+    }
+
+    fun commit(ticket: Ticket) {
+        ticket.meta.delete()
+        ticket.data.delete()
+    }
+
+    /** Run once at launch. Puts back any original whose update was cut off. */
+    suspend fun recover(context: Context): Report {
+        val dir = File(context.filesDir, DIR)
+        val metas = dir.listFiles { f -> f.name.endsWith(".txt") }.orEmpty()
+        var restored = 0
+        var exported = 0
+
+        for (meta in metas) {
+            val data = File(dir, meta.name.removeSuffix(".txt") + ".bin")
+            val lines = runCatching { meta.readLines() }.getOrDefault(emptyList())
+            if (!data.exists() || lines.size < 4) {
+                meta.delete()
+                data.delete()
+                continue
+            }
+            val name = lines[0]
+            val target = PhotoTarget(
+                file = lines[1].takeIf { it.isNotEmpty() }?.let { File(it) },
+                mediaUri = lines[2].takeIf { it.isNotEmpty() }?.let { Uri.parse(it) }
+            )
+            val expectedSize = lines[3].toLongOrNull() ?: -1L
+
+            // The update finished and only the tidy-up was missed: nothing to put back.
+            if (expectedSize > 0 && MediaStoreSaver.currentSize(context, target) == expectedSize) {
+                meta.delete()
+                data.delete()
+                continue
+            }
+
+            val original = runCatching { data.readBytes() }.getOrNull()
+            if (original == null) {
+                meta.delete()
+                data.delete()
+                continue
+            }
+            if (MediaStoreSaver.writeBytesInPlace(context, target, original)) {
+                restored++
+                meta.delete()
+                data.delete()
+            } else {
+                // No longer allowed to touch the original, so hand the photo back as a new file.
+                val base = name.substringBeforeLast('.', name)
+                val saved = MediaStoreSaver.saveCopy(context, data, "$base (original).jpg", captureTime = null)
+                if (saved.isSuccess) {
+                    exported++
+                    meta.delete()
+                    data.delete()
+                }
+            }
+        }
+
+        // Backups without a ticket were never relied on.
+        dir.listFiles { f -> f.name.endsWith(".bin") }.orEmpty()
+            .filter { !File(dir, it.name.removeSuffix(".bin") + ".txt").exists() }
+            .forEach { it.delete() }
+
+        return Report(restored, exported)
+    }
+}

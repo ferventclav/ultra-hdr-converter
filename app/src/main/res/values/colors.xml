@@ -1,0 +1,4 @@
+<resources>
+    <!-- Same as OneUiLightBg in ui/theme/Color.kt -->
+    <color name="app_background">#F1F1F3</color>
+</resources>
