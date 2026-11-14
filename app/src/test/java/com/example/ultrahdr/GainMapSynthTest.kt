@@ -60,6 +60,29 @@ class GainMapSynthTest {
 
     private fun gainAt(plan: GainMapPlan, x: Int, y: Int) = plan.gains[y * w + x].toInt() and 0xFF
 
+    /**
+     * Smoothing flat areas changes single pixels, never the look: on average a pixel moves by at
+     * most 2 of 255, and the overall boost stays within 4% of version 1.9's.
+     */
+    private fun assertCloseToVersion19(label: String, expected: ByteArray, actual: ByteArray) {
+        assertEquals(expected.size, actual.size)
+        var change = 0L
+        var sumBefore = 0L
+        var sumAfter = 0L
+        for (i in expected.indices) {
+            val e = expected[i].toInt() and 0xFF
+            val a = actual[i].toInt() and 0xFF
+            change += kotlin.math.abs(e - a)
+            sumBefore += e
+            sumAfter += a
+        }
+        val n = expected.size.toDouble()
+        assertTrue("$label: average change ${change / n} of 255", change / n <= 2.0)
+        val before = sumBefore / n
+        val after = sumAfter / n
+        assertTrue("$label: overall boost $after vs $before", kotlin.math.abs(after - before) <= maxOf(1.0, 0.04 * before))
+    }
+
     /** Version 1.9's gain map, copied from its UltraHdrProcessor so the two can be compared. */
     private class Reference(val gains: ByteArray, val headroom: Float)
 
@@ -107,7 +130,7 @@ class GainMapSynthTest {
     }
 
     @Test
-    fun balancedIsVersion19ByteForByte() {
+    fun balancedKeepsVersion19sLook() {
         val pictures = listOf(
             scene(0), scene(1), scene(2), scene(3), scene(4),
             spot(rgb(30, 30, 40), rgb(255, 255, 255)),
@@ -118,8 +141,55 @@ class GainMapSynthTest {
         pictures.forEachIndexed { index, px ->
             val expected = version19(px)
             val actual = plan(px)
-            assertArrayEquals("gain map of picture $index", expected.gains, actual.gains)
+            assertCloseToVersion19("picture $index", expected.gains, actual.gains)
             assertEquals("headroom of picture $index", expected.headroom, actual.ratioMax, 0f)
+        }
+        // Flat colour has nothing to smooth: byte for byte.
+        assertArrayEquals(version19(flat(rgb(250, 250, 250))).gains, plan(flat(rgb(250, 250, 250))).gains)
+    }
+
+    /** A bright sky with the faint grain and banding a JPEG leaves, under one step of brightness. */
+    @Test
+    fun aSmoothSkyHasNoRipples() {
+        val sw = 1280
+        val sh = 960
+        var state = 7
+        fun grain(): Float {
+            state = state * 1103515245 + 12345
+            return ((state ushr 16) and 0xFF) / 255f - 0.5f
+        }
+        val px = IntArray(sw * sh) { i ->
+            val x = i % sw
+            val y = i / sw
+            val level = 255f * (0.84f + 0.13f * (1f - y / sh.toFloat()) + 0.01f * kotlin.math.sin(x / 90f + y / 60f))
+            val v = (level + grain() * 1.2f).let { kotlin.math.round(it).toInt() }.coerceIn(0, 255)
+            rgb(v, v, v)
+        }
+        fun worstStep(g: ByteArray): Int {
+            var worst = 0
+            for (y in 0 until sh) for (x in 0 until sw) {
+                val here = g[y * sw + x].toInt() and 0xFF
+                if (x + 1 < sw) worst = maxOf(worst, kotlin.math.abs(here - (g[y * sw + x + 1].toInt() and 0xFF)))
+                if (y + 1 < sh) worst = maxOf(worst, kotlin.math.abs(here - (g[(y + 1) * sw + x].toInt() and 0xFF)))
+            }
+            return worst
+        }
+        val before = version19(px).gains
+        val after = GainMapSynth.plan(px, sw, sh, HdrStrength.BALANCED).gains
+        assertTrue("version 1.9 jumps between neighbours: ${worstStep(before)}", worstStep(before) >= 20)
+        assertTrue("no ripples left: ${worstStep(after)} of 255", worstStep(after) <= 5)
+        assertCloseToVersion19("sky", before, after)
+    }
+
+    @Test
+    fun aBrightEdgeStaysSharp() {
+        // White square from x = 140 to 259 on a dark frame: no glow spills out, none is lost inside.
+        val p = plan(spot(rgb(30, 30, 40), rgb(255, 255, 255), side = 120))
+        for (y in listOf(100, 150, 200)) {
+            assertTrue("inside, 2 px from the left edge", gainAt(p, 142, y) >= 250)
+            assertTrue("inside, 2 px from the right edge", gainAt(p, 257, y) >= 250)
+            assertEquals("outside, 2 px to the left", 0, gainAt(p, 137, y))
+            assertEquals("outside, 2 px to the right", 0, gainAt(p, 262, y))
         }
     }
 

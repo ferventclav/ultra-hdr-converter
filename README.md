@@ -11,7 +11,7 @@ Photos are picked from the app's own grid, which lists only photos stored on the
 one converts at full quality in place. Photos still only in Google Photos can be picked from the
 ⋮ menu, and come back as smaller copies without camera details or location.
 
-There are no settings. Version 1.1, package `com.example.ultrahdr`. Built for a Samsung Galaxy
+There are no settings. Version 1.2, package `com.example.ultrahdr`. Built for a Samsung Galaxy
 running One UI, and it should work on any Android 14 phone that shows Ultra HDR photos.
 ## What happens to a photo
 
@@ -24,11 +24,12 @@ for a photo that has none and saves the photo again with it.
 | JPEG stored on the phone | Updated where it is. Same file, same place in Gallery. |
 | Already HDR (camera or another app) | Skipped, never touched. |
 | No bright highlights | Skipped, because nothing would change. |
-| Cloud photo (⋮ menu, or shared from Google Photos) | An HDR copy is saved to `Pictures/UltraHDR`. |
+| Cloud photo (⋮ menu, or shared from Google Photos) | An HDR copy is saved to `Pictures/UltraHDR`, named and dated the same whichever way it arrived. |
 | Not a JPEG, motion photo, over 26 MP, or the real file can't be found | Left alone, with the reason on the result screen. |
 
 Each photo is decoded upright, given its gain map, saved as a JPEG at quality 96 with its EXIF
-data (including GPS) copied over, and written back in place. Before anything is replaced, the
+data (including GPS, and exposure time and f-number to the exact fraction) copied over, and
+written back in place. Before anything is replaced, the
 phone's own decoder must confirm the new file is an Ultra HDR photo. While the original is being
 rewritten, a backup of it sits in the app's private storage; if the app is killed in that moment,
 the next launch puts the original back. A batch can only stop between photos, never part way
@@ -42,7 +43,9 @@ through one.
 - the boost starts at the photo's own 85th percentile, and never below a floor that keeps skin
   and midtones out of it
 - it rises steeply, so only the top of the range moves
-- the map is worked out at up to 1280 px on the long side; nothing is blurred
+- faint ripples in smooth areas such as skies are evened out first, so the steep boost can't turn
+  them into visible bands; edges and texture are left sharp
+- the map is worked out at up to 1280 px on the long side
 
 ## Permissions
 
@@ -68,6 +71,7 @@ app/src/main/java/com/example/ultrahdr/
     MediaStoreSaver.kt         finding the real file, safe in-place writes, saving copies
     RecoveryStore.kt           the backup that survives a crash mid-write
     ImageExifHelper.kt         upright decoding, capture date, EXIF copy
+    ExifRationals.kt           exact exposure time and f-number after the EXIF copy
     JpegMpfFixer.kt            repairs the MPF index after EXIF edits
     Models.kt                  photo, outcome and result types
   ui/

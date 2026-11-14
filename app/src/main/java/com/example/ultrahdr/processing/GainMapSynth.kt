@@ -4,6 +4,7 @@ import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
  * How strong the HDR effect is.
@@ -40,13 +41,14 @@ class GainMapPlan(
 /**
  * Works out which parts of a normal photo should glow on an HDR screen.
  *
- * This is the method version 1.9 used, kept exactly, because it is the one that was judged on a
- * real phone: plain brightness decides everything, the boost starts at the photo's own 85th
- * percentile, and it rises steeply so only the top of the range moves. Colour, however saturated,
- * never counts as a highlight. Nothing is blurred.
+ * This is the method version 1.9 used, because it is the one that was judged on a real phone:
+ * plain brightness decides everything, the boost starts at the photo's own 85th percentile, and it
+ * rises steeply so only the top of the range moves. Colour, however saturated, never counts as a
+ * highlight.
  *
- * The one addition is [mostlyWhiteGuard], which only acts on pictures that are nearly all white,
- * and only for SUBTLE and VIVID. BALANCED is never changed by it.
+ * Two additions. [smoothFlatAreas] evens out faint ripples in smooth areas such as skies before
+ * the boost is worked out; edges and texture are not blurred. [mostlyWhiteGuard] only acts on
+ * pictures that are nearly all white, and only for SUBTLE and VIVID.
  */
 object GainMapSynth {
 
@@ -111,11 +113,12 @@ object GainMapSynth {
             else -> 2.8f                             // flat, soft light
         }
 
-        // 4. The map itself.
+        // 4. The map itself, read from brightness with the faint ripples of a smooth sky taken out.
+        val smooth = smoothFlatAreas(luma, width, height)
         val gains = ByteArray(count)
         val gainHistogram = IntArray(256)
         for (i in 0 until count) {
-            val y = luma[i]
+            val y = smooth[i]
             val gain = if (y > knee) ((y - knee) / range).pow(CURVE) else 0f
             val level = (gain.coerceIn(0f, 1f) * 255f).toInt()
             gains[i] = level.toByte()
@@ -160,6 +163,65 @@ object GainMapSynth {
         if (t <= 0f) return ratio
         val eased = t * t * (3f - 2f * t)
         return 1f + (ratio - 1f) * (1f - 0.75f * eased)
+    }
+
+    /**
+     * The boost climbs steeply, so one step of brightness in a smooth sky (a band too faint to see
+     * in the photo) becomes a 7% jump on an HDR screen, and the sky shows ripples. This evens out
+     * variations of about [FLAT_STEPS] steps or less over a window of about 2% of the picture,
+     * and leaves edges, texture and real gradients as they are (a self-guided filter: each window
+     * is fitted with a straight line, which flattens ripples but follows a slope or an edge).
+     */
+    internal fun smoothFlatAreas(luma: FloatArray, width: Int, height: Int): FloatArray {
+        val count = width * height
+        val radius = maxOf(2, (maxOf(width, height) / 128f).roundToInt())
+        val eps = (FLAT_STEPS / 255f).let { it * it }
+        val mean = FloatArray(count)
+        val second = FloatArray(count)
+        val scratch = FloatArray(count)
+        boxMean(luma, mean, scratch, width, height, radius)
+        for (i in 0 until count) second[i] = luma[i] * luma[i]
+        boxMean(second, second, scratch, width, height, radius)
+        // mean becomes b, second becomes a: y = a * luma + b fits each window.
+        for (i in 0 until count) {
+            val variance = (second[i] - mean[i] * mean[i]).coerceAtLeast(0f)
+            val a = variance / (variance + eps)
+            second[i] = a
+            mean[i] = mean[i] * (1f - a)
+        }
+        boxMean(second, second, scratch, width, height, radius)
+        boxMean(mean, mean, scratch, width, height, radius)
+        for (i in 0 until count) mean[i] = second[i] * luma[i] + mean[i]
+        return mean
+    }
+
+    /** Variations up to about this many brightness steps (of 255) count as flat. */
+    private const val FLAT_STEPS = 3.1f
+
+    /** Average over a square window, shrunk at the borders. [into] may be [from]. */
+    private fun boxMean(from: FloatArray, into: FloatArray, scratch: FloatArray, w: Int, h: Int, r: Int) {
+        for (y in 0 until h) {
+            val row = y * w
+            var sum = 0.0
+            for (x in 0 until minOf(r, w - 1) + 1) sum += from[row + x]
+            for (x in 0 until w) {
+                val left = x - r
+                val right = x + r
+                scratch[row + x] = (sum / (minOf(right, w - 1) - maxOf(left, 0) + 1)).toFloat()
+                if (right + 1 < w) sum += from[row + right + 1]
+                if (left >= 0) sum -= from[row + left]
+            }
+        }
+        val column = DoubleArray(w)
+        for (y in 0 until minOf(r, h - 1) + 1) for (x in 0 until w) column[x] += scratch[y * w + x]
+        for (y in 0 until h) {
+            val top = y - r
+            val bottom = y + r
+            val n = minOf(bottom, h - 1) - maxOf(top, 0) + 1
+            for (x in 0 until w) into[y * w + x] = (column[x] / n).toFloat()
+            if (bottom + 1 < h) for (x in 0 until w) column[x] += scratch[(bottom + 1) * w + x]
+            if (top >= 0) for (x in 0 until w) column[x] -= scratch[top * w + x]
+        }
     }
 
     /**
