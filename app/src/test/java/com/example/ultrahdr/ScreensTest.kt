@@ -9,12 +9,14 @@ import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -30,13 +32,19 @@ import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.ultrahdr.processing.GainMapPlan
+import com.example.ultrahdr.processing.LocalPhoto
+import com.example.ultrahdr.processing.PhotoAccess
 import com.example.ultrahdr.processing.HdrStrength
 import com.example.ultrahdr.processing.Outcome
 import com.example.ultrahdr.processing.PhotoItem
 import com.example.ultrahdr.processing.PhotoResult
 import com.example.ultrahdr.processing.PhotoTarget
 import com.example.ultrahdr.processing.UltraHdrEngine
+import com.example.ultrahdr.ui.GalleryActions
+import com.example.ultrahdr.ui.GalleryPage
+import com.example.ultrahdr.ui.GalleryState
 import com.example.ultrahdr.ui.Notice
+import com.example.ultrahdr.ui.TileChip
 import com.example.ultrahdr.ui.Phase
 import com.example.ultrahdr.ui.PromptCard
 import com.example.ultrahdr.ui.ScreenActions
@@ -249,6 +257,57 @@ class ScreensTest {
         strength.name.lowercase(Locale.US), plan.peakBoost, plan.boostedShare * 100f
     )
 
+    // ---------------------------------------------------------------------------------- photo grid
+
+    @Test
+    fun gallery() = galleryScreen("30_gallery", galleryState()) {
+        compose.onNodeWithText("Select photos").assertIsDisplayed()
+        compose.onNodeWithText("All").assertIsDisplayed()
+        compose.onNodeWithText("Camera").assertIsDisplayed()
+        compose.onNodeWithText("Convert").assertIsDisplayed()
+    }
+
+    @Test
+    fun galleryDark() = galleryScreen("30_gallery_dark", galleryState(), dark = true)
+
+    @Test
+    fun galleryPicked() = galleryScreen("31_gallery_picked", galleryState(selected = setOf(3L, 4L, 5L, 6L, 1L))) {
+        compose.onNodeWithText("5 selected").assertIsDisplayed()
+        compose.onNodeWithText("Convert 5").assertIsDisplayed()
+    }
+
+    @Test
+    fun galleryPickedDark() = galleryScreen("31_gallery_picked_dark", galleryState(selected = setOf(3L, 4L, 5L, 6L)), dark = true)
+
+    @Test
+    fun galleryOneAlbum() = galleryScreen("32_gallery_whatsapp", galleryState(album = "WhatsApp Images"), dark = true) {
+        compose.onNodeWithText("WhatsApp").assertIsDisplayed()
+    }
+
+    @Test
+    fun gallerySomeAccess() = galleryScreen("33_gallery_some_access", galleryState(access = PhotoAccess.SOME)) {
+        compose.onNodeWithText("Allow all").assertIsDisplayed()
+    }
+
+    @Test
+    fun galleryNoAccess() = galleryScreen("34_gallery_no_access", GalleryState(open = true, access = PhotoAccess.NONE)) {
+        compose.onNodeWithText("Allow").assertIsDisplayed()
+    }
+
+    @Test
+    fun galleryLargeText() = galleryScreen("37_gallery_large_text", galleryState(selected = setOf(1L, 2L, 3L)), dark = true, fontScale = 1.3f) {
+        compose.onNodeWithText("Convert 3").assertIsDisplayed()
+    }
+
+    /** The Galaxy S25 at its default display size, to set beside an Enhance-X screenshot. */
+    @Test
+    @Config(qualifiers = "w384dp-h832dp-xxhdpi")
+    fun galleryS25() = galleryScreen("36_gallery_s25", galleryState(), dark = true)
+
+    @Test
+    @Config(qualifiers = TABLET)
+    fun galleryTablet() = galleryScreen("35_gallery_tablet", galleryState(selected = setOf(2L)), dark = true)
+
     // ---------------------------------------------------------------------------------- tools
 
     private val recording: Boolean get() = System.getProperty("roborazzi.test.record") == "true"
@@ -293,6 +352,49 @@ class ScreensTest {
         }
         compose.waitForIdle()
         compose.onRoot().captureRoboImage("build/screens/$name.png")
+    }
+
+    private fun galleryScreen(
+        name: String,
+        state: GalleryState,
+        dark: Boolean = false,
+        fontScale: Float = 1f,
+        checks: () -> Unit = {}
+    ) {
+        compose.setContent {
+            Scaled(fontScale) {
+                UltraHdrTheme(darkTheme = dark) {
+                    GalleryPage(state = state, actions = GalleryActions(), thumbnail = paintedLocal)
+                }
+            }
+        }
+        compose.waitForIdle()
+        checks()
+        compose.onRoot().captureRoboImage("build/screens/$name.png")
+    }
+
+    /** Painted stand-ins; every fourth one carries the HDR label the real thumbnail shows. */
+    private val paintedLocal: @Composable (LocalPhoto, Modifier) -> Unit = { photo, modifier ->
+        val image = remember(photo.id) { TestScenes.bitmap(photo.id.toInt(), 240, 240).asImageBitmap() }
+        Box(modifier) {
+            Image(image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            if (photo.id % 4 == 2L) TileChip("HDR", Modifier.align(Alignment.BottomStart).padding(5.dp))
+        }
+    }
+
+    private fun galleryState(
+        selected: Set<Long> = emptySet(),
+        album: String? = null,
+        access: PhotoAccess = PhotoAccess.ALL
+    ): GalleryState {
+        val hour = 3_600_000L
+        val albums = listOf("Camera", "WhatsApp Images", "Camera", "Screenshots", "Download", "Camera", "WhatsApp Images")
+        val photos = (0 until 40).map { i ->
+            // About six photos a day, going back from this afternoon.
+            val taken = GALLERY_NOW - hour - i * 4L * hour
+            LocalPhoto(i.toLong(), uri(i), albums[i % albums.size], taken, taken)
+        }
+        return GalleryState(open = true, access = access, photos = photos, album = album, selected = selected)
     }
 
     @Composable
@@ -359,6 +461,10 @@ class ScreensTest {
         /** Galaxy Tab S9, upright. */
         const val TABLET = "w800dp-h1280dp-xhdpi"
         const val TABLET_SIDEWAYS = "w1280dp-h800dp-xhdpi"
+
+        /** 15 Nov 2026, 13:29 local time. */
+        val GALLERY_NOW: Long = java.time.LocalDateTime.of(2026, 11, 15, 13, 29)
+            .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
 
         private val onPhone = PhotoTarget(File("/storage/emulated/0/DCIM/Camera/photo.jpg"), null)
 

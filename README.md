@@ -7,7 +7,11 @@ or share them to the app from Gallery, and it converts them straight away. On an
 bright parts (sun, lamps, sky, reflections) then glow brighter than white. On a normal screen the
 photos look as before.
 
-There are no settings. Version 1.0, package `com.example.ultrahdr`. Built for a Samsung Galaxy
+Photos are picked from the app's own grid, which lists only photos stored on the phone, so every
+one converts at full quality in place. Photos still only in Google Photos can be picked from the
+⋮ menu, and come back as smaller copies without camera details or location.
+
+There are no settings. Version 1.1, package `com.example.ultrahdr`. Built for a Samsung Galaxy
 running One UI, and it should work on any Android 14 phone that shows Ultra HDR photos.
 ## What happens to a photo
 
@@ -20,7 +24,7 @@ for a photo that has none and saves the photo again with it.
 | JPEG stored on the phone | Updated where it is. Same file, same place in Gallery. |
 | Already HDR (camera or another app) | Skipped, never touched. |
 | No bright highlights | Skipped, because nothing would change. |
-| Cloud photo | An HDR copy is saved to `Pictures/UltraHDR`. |
+| Cloud photo (⋮ menu, or shared from Google Photos) | An HDR copy is saved to `Pictures/UltraHDR`. |
 | Not a JPEG, motion photo, over 26 MP, or the real file can't be found | Left alone, with the reason on the result screen. |
 
 Each photo is decoded upright, given its gain map, saved as a JPEG at quality 96 with its EXIF
@@ -44,7 +48,7 @@ through one.
 
 | Permission | Why |
 | --- | --- |
-| Photos (full or limited access) | Find the real file behind a picked photo, so it can be updated where it is. |
+| Photos (full or limited access) | List the photos on the phone in the grid, and find the real file behind a shared photo, so it can be updated where it is. |
 | Photo location | Read a photo complete with its GPS position, so the position survives the update. |
 | Media management (Settings, Apps, Special access) | Optional. Once on, Android lets the app update photos without asking for each batch. The start screen offers it while it is off. |
 
@@ -56,6 +60,8 @@ app/src/main/java/com/example/ultrahdr/
   processing/
     BatchConverter.kt          one photo at a time: HDR check, where it may go, convert, save
     SaveDecision.kt            in place, copy or leave alone, and the Copy report text
+    LocalPhotos.kt             the JPEGs on the phone for the grid, albums, HDR label check
+    PhotoNames.kt              readable names for photos that arrive with cache names
     GainMapSynth.kt            which parts get brighter, and by how much
     UltraHdrEngine.kt          decoding, attaching the gain map, the decoder check
     UltraHdrContainer.kt       reading a JPEG's layout
@@ -66,7 +72,8 @@ app/src/main/java/com/example/ultrahdr/
     Models.kt                  photo, outcome and result types
   ui/
     UltraHdrViewModel.kt       queue, background checks, conversion, Copy report
-    UltraHdrScreen.kt          the one screen: empty state, photo grid, results
+    UltraHdrScreen.kt          the main screen: empty state, photo grid, results
+    GalleryPage.kt             the photo picker, laid out like Galaxy Enhance-X's home screen
     Components.kt, Glass.kt    One UI buttons, rows, tiles, glass toolbar and dialogs
     ResultSummary.kt           the wording of the result card
     theme/                     One UI colours (the accent follows the wallpaper), type, shapes

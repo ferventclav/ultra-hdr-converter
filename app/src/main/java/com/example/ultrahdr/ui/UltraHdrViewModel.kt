@@ -13,9 +13,12 @@ import com.example.ultrahdr.processing.ConvertOptions
 import com.example.ultrahdr.processing.CopyReport
 import com.example.ultrahdr.processing.HdrStrength
 import com.example.ultrahdr.processing.ImageExifHelper
+import com.example.ultrahdr.processing.LocalPhoto
+import com.example.ultrahdr.processing.LocalPhotos
 import com.example.ultrahdr.processing.MediaStoreSaver
 import com.example.ultrahdr.processing.PhotoItem
 import com.example.ultrahdr.processing.PhotoNames
+import com.example.ultrahdr.processing.PhotoAccess
 import com.example.ultrahdr.processing.PhotoResult
 import com.example.ultrahdr.processing.RecoveryStore
 import com.example.ultrahdr.processing.UltraHdrContainer
@@ -54,8 +57,22 @@ data class UiState(
     val askAboutPrompts: Boolean = false
 )
 
+/** The app's own photo grid: only photos stored on the phone, so every one can be updated in place. */
+data class GalleryState(
+    val open: Boolean = false,
+    val loading: Boolean = false,
+    val access: PhotoAccess = PhotoAccess.ALL,
+    val photos: List<LocalPhoto> = emptyList(),
+    /** The album tab shown. Null is "All". */
+    val album: String? = null,
+    /** Picked photo ids, in the order they were tapped. */
+    val selected: Set<Long> = emptySet()
+)
+
 sealed class UiEvent {
     data class RequestWritePermission(val intentSender: IntentSender) : UiEvent()
+    /** Android's photo access dialog, for the grid. */
+    data object RequestPhotoAccess : UiEvent()
     /** Opens Android's "Media management" page for this app. */
     data object OpenMediaManagement : UiEvent()
 }
@@ -77,8 +94,12 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
     private val _events = MutableSharedFlow<UiEvent>()
     val events: SharedFlow<UiEvent> = _events.asSharedFlow()
 
+    private val _gallery = MutableStateFlow(GalleryState())
+    val gallery: StateFlow<GalleryState> = _gallery.asStateFlow()
+
     private var checkJob: Job? = null
     private var convertJob: Job? = null
+    private var galleryJob: Job? = null
 
     /** If the app was killed half way through an in-place update last time, put the original back first. */
     private val recoveryJob: Job = viewModelScope.launch(Dispatchers.IO) {
@@ -148,6 +169,65 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
             uri = uri, name = name, checked = true, target = target,
             alreadyHdr = alreadyHdr, redoable = redoable, takenAt = takenAt
         )
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // The photo grid
+    // ------------------------------------------------------------------------------------------
+
+    fun openGallery() {
+        _gallery.update { it.copy(open = true, loading = it.photos.isEmpty()) }
+        reloadGallery()
+    }
+
+    fun closeGallery() {
+        _gallery.update { it.copy(open = false, selected = emptySet()) }
+    }
+
+    /** Reads the library again: on opening, on coming back to the app, and after the access dialog. */
+    fun reloadGallery() {
+        if (!_gallery.value.open) return
+        galleryJob?.cancel()
+        galleryJob = viewModelScope.launch(Dispatchers.IO) {
+            val access = LocalPhotos.access(context)
+            val photos = if (access == PhotoAccess.NONE) emptyList() else runCatching { LocalPhotos.load(context) }.getOrDefault(emptyList())
+            val ids = photos.mapTo(HashSet()) { it.id }
+            _gallery.update { g ->
+                g.copy(
+                    loading = false,
+                    access = access,
+                    photos = photos,
+                    album = g.album?.takeIf { album -> photos.any { it.album == album } },
+                    selected = g.selected.filterTo(LinkedHashSet()) { it in ids }
+                )
+            }
+        }
+    }
+
+    fun chooseAlbum(album: String?) = _gallery.update { it.copy(album = album) }
+
+    fun togglePhoto(id: Long) = _gallery.update {
+        it.copy(selected = if (id in it.selected) it.selected - id else it.selected + id)
+    }
+
+    /** The round button by the tabs: picks every photo in the tab, or clears them when all are picked. */
+    fun toggleAll(ids: List<Long>) = _gallery.update {
+        it.copy(selected = if (it.selected.containsAll(ids)) it.selected - ids.toSet() else it.selected + ids)
+    }
+
+    fun clearSelection() = _gallery.update { it.copy(selected = emptySet()) }
+
+    /** Converts the picked photos the same way as picked or shared ones. */
+    fun convertSelected() {
+        val g = _gallery.value
+        val byId = g.photos.associateBy { it.id }
+        val uris = g.selected.mapNotNull { byId[it]?.uri }
+        closeGallery()
+        if (uris.isNotEmpty()) addPhotos(uris)
+    }
+
+    fun allowPhotoAccess() {
+        viewModelScope.launch { _events.emit(UiEvent.RequestPhotoAccess) }
     }
 
     /** Leaves a batch that was not started, or the result screen. */

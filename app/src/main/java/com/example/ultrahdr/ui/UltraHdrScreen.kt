@@ -17,6 +17,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -119,6 +121,7 @@ class ScreenActions(
 @Composable
 fun UltraHdrApp(viewModel: UltraHdrViewModel) {
     val state by viewModel.state.collectAsState()
+    val gallery by viewModel.gallery.collectAsState()
     val context = LocalContext.current
 
     val picker = rememberLauncherForActivityResult(
@@ -127,9 +130,7 @@ fun UltraHdrApp(viewModel: UltraHdrViewModel) {
 
     val actions = remember(viewModel, picker) {
         ScreenActions(
-            pickPhotos = {
-                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-            },
+            pickPhotos = viewModel::openGallery,
             clearPhotos = viewModel::clearPhotos,
             tryAgain = viewModel::convert,
             stop = viewModel::stop,
@@ -150,6 +151,23 @@ fun UltraHdrApp(viewModel: UltraHdrViewModel) {
         )
     }
 
+    // The grid lists photos on the phone. Google Photos, through Android's picker, is in its menu.
+    val galleryActions = remember(viewModel, picker) {
+        GalleryActions(
+            close = viewModel::closeGallery,
+            chooseAlbum = viewModel::chooseAlbum,
+            toggle = viewModel::togglePhoto,
+            toggleAll = viewModel::toggleAll,
+            clearSelection = viewModel::clearSelection,
+            convert = viewModel::convertSelected,
+            allowAccess = viewModel::allowPhotoAccess,
+            googlePhotos = {
+                viewModel.closeGallery()
+                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            }
+        )
+    }
+
     // HDR pictures only show as HDR while the window asks for it: the converted photos at the end.
     val showsHdr = state.phase is Phase.Finished
     val working = state.phase is Phase.Working
@@ -166,8 +184,19 @@ fun UltraHdrApp(viewModel: UltraHdrViewModel) {
 
     BackHandler(enabled = state.phase is Phase.Finished) { viewModel.done() }
     BackHandler(enabled = state.phase is Phase.Idle && state.photos.isNotEmpty()) { viewModel.clearPhotos() }
+    // Registered last, so it wins while the grid is open.
+    BackHandler(enabled = gallery.open) { viewModel.closeGallery() }
 
-    UltraHdrScreen(state = state, actions = actions)
+    Box(Modifier.fillMaxSize()) {
+        UltraHdrScreen(state = state, actions = actions)
+        AnimatedVisibility(
+            visible = gallery.open,
+            enter = fadeIn(tween(220, easing = OneUiEasing)) + slideInVertically(tween(320, easing = OneUiEasing)) { it / 10 },
+            exit = fadeOut(tween(160)) + slideOutVertically(tween(200)) { it / 10 }
+        ) {
+            GalleryPage(state = gallery, actions = galleryActions)
+        }
+    }
 }
 
 private fun Context.findActivity(): Activity? {

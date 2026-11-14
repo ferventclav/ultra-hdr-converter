@@ -16,6 +16,8 @@ import androidx.activity.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.example.ultrahdr.processing.LocalPhotos
+import com.example.ultrahdr.processing.PhotoAccess
 import com.example.ultrahdr.ui.UiEvent
 import com.example.ultrahdr.ui.UltraHdrApp
 import com.example.ultrahdr.ui.UltraHdrViewModel
@@ -29,6 +31,11 @@ class MainActivity : ComponentActivity() {
     private val mediaPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { /* The app works either way: without access, photos are saved as copies. */ }
+
+    /** Asked again from the photo grid. The grid reads the library afresh with whatever was allowed. */
+    private val photoAccessLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { viewModel.reloadGallery() }
 
     /** Android's own "Allow this app to modify N photos?" dialog. With media management on, no dialog shows. */
     private val writeRequestLauncher = registerForActivityResult(
@@ -60,6 +67,7 @@ class MainActivity : ComponentActivity() {
                             IntentSenderRequest.Builder(event.intentSender).build()
                         )
                         UiEvent.OpenMediaManagement -> openMediaManagement()
+                        UiEvent.RequestPhotoAccess -> requestPhotoAccess()
                     }
                 }
             }
@@ -95,8 +103,32 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Media management may have been turned on or off in Settings meanwhile.
+        // Media management may have been turned on or off in Settings meanwhile, and photos taken.
         viewModel.refreshAccess()
+        viewModel.reloadGallery()
+    }
+
+    /**
+     * After two refusals Android stops showing its dialog, so the app's page in Settings opens
+     * instead, where photo access can still be turned on.
+     */
+    private fun requestPhotoAccess() {
+        val refusedForGood = LocalPhotos.access(this) == PhotoAccess.NONE &&
+            !shouldShowRequestPermissionRationale(Manifest.permission.READ_MEDIA_IMAGES)
+        if (refusedForGood) {
+            try {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+                return
+            } catch (_: ActivityNotFoundException) {
+            }
+        }
+        photoAccessLauncher.launch(
+            arrayOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+                Manifest.permission.ACCESS_MEDIA_LOCATION
+            )
+        )
     }
 
     private fun openMediaManagement() {
