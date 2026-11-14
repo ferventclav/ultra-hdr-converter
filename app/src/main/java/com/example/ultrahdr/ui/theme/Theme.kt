@@ -49,28 +49,37 @@ private val OneUiLightColorScheme = lightColorScheme(
 )
 
 /**
- * One type scale for the whole app, in the system font (SamsungOne on a Galaxy).
- * Sizes follow One UI: a large screen title, 17sp row titles, 13sp supporting text.
+ * One UI's type scale, in the system font (One UI Sans on a Galaxy), as the Knowledge app uses it:
+ * a 36sp bold enlarged header, 20sp bold titles, 18sp row titles, 14sp supporting text.
  */
 private val UhdrTypography = Typography(
-    displaySmall = TextStyle(fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
-    titleLarge = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp),
-    titleMedium = TextStyle(fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
-    titleSmall = TextStyle(fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold),
-    bodyLarge = TextStyle(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Normal),
+    // Enlarged header title.
+    displaySmall = TextStyle(fontSize = 36.sp, lineHeight = 41.sp, fontWeight = FontWeight.Bold),
+    // Collapsed app bar title, dialog titles.
+    titleLarge = TextStyle(fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold),
+    // Row titles.
+    titleMedium = TextStyle(fontSize = 18.sp, lineHeight = 23.sp, fontWeight = FontWeight.Normal),
+    titleSmall = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold),
+    // Dialog text.
+    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.Normal),
+    // Info lines under a title, captions.
     bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal),
     bodySmall = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Normal),
-    labelLarge = TextStyle(fontSize = 16.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold),
+    // Buttons.
+    labelLarge = TextStyle(fontSize = 17.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold),
+    // Card sub-headers ("How it works").
     labelMedium = TextStyle(fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold),
+    // Chips on photos.
     labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold)
 )
 
+/** The One UI corner is 28dp on every card, row group and dialog. Photo tiles use 14dp. */
 private val UhdrShapes = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
     small = RoundedCornerShape(14.dp),
-    medium = RoundedCornerShape(18.dp),
-    large = RoundedCornerShape(26.dp),
-    extraLarge = RoundedCornerShape(32.dp)
+    medium = RoundedCornerShape(14.dp),
+    large = RoundedCornerShape(28.dp),
+    extraLarge = RoundedCornerShape(28.dp)
 )
 
 @Composable

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Finding the real file behind a picked photo, so it can be updated where it is. -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
@@ -7,6 +8,13 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
     <!-- Reading a photo complete with its GPS position, so the position survives the update. -->
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
+    <!--
+        "Media management" (Settings, Apps, Special access). Once the person turns it on, Android
+        grants the app's requests to update photos without showing a dialog every time.
+    -->
+    <uses-permission
+        android:name="android.permission.MANAGE_MEDIA"
+        tools:ignore="ProtectedPermissions" />
 
     <!--
         Never asked for any more. Kept so that people who granted "All files access" to an older

@@ -39,7 +39,7 @@ object SaveDecision {
             SavePlan.LeaveAlone("Needs the photo location permission, or updating it would erase where it was taken.")
         !f.bytesFromTarget ->
             SavePlan.LeaveAlone("Couldn't confirm the picked photo is the file on the phone, so the file wasn't changed.")
-        !f.isJpeg -> SavePlan.LeaveAlone("Not a JPEG. Turn off Update original photos to get an HDR copy.")
+        !f.isJpeg -> SavePlan.LeaveAlone("Not a JPEG, so it was left as it is.")
         f.isMotionPhoto -> SavePlan.LeaveAlone("Motion photo. Saving it again would remove its video.")
         f.pixels <= 0 -> SavePlan.LeaveAlone("Couldn't read the picture's size, so it wasn't changed.")
         f.pixels > UltraHdrEngine.MAX_REENCODE_PIXELS ->

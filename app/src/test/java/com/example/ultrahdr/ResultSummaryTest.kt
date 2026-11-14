@@ -3,13 +3,7 @@ package com.example.ultrahdr
 import com.example.ultrahdr.processing.Outcome
 import com.example.ultrahdr.processing.PhotoResult
 import com.example.ultrahdr.ui.LineKind
-import com.example.ultrahdr.ui.PreviewMode
-import com.example.ultrahdr.ui.PreviewUi
 import com.example.ultrahdr.ui.Tone
-import com.example.ultrahdr.ui.formatBoost
-import com.example.ultrahdr.ui.formatShare
-import com.example.ultrahdr.ui.previewDetail
-import com.example.ultrahdr.ui.previewHeadline
 import com.example.ultrahdr.ui.summarize
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -20,7 +14,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** The words on the result card and the preview, for every way a batch can end. */
+/** The words on the result card, for every way a batch can end. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], manifest = Config.NONE)
 class ResultSummaryTest {
@@ -109,38 +103,5 @@ class ResultSummaryTest {
     fun stoppingEarlySaysHowManyWereLeft() {
         val s = summarize(listOf(result(1, Outcome.UPDATED)), total = 5, stopped = true)
         assertEquals(listOf("1 updated in place in Gallery", "4 not started"), s.lines.map { it.text })
-    }
-
-    @Test
-    fun boostAndShareAreWrittenTheWayPeopleSayThem() {
-        assertEquals("3x", formatBoost(3.0f))
-        assertEquals("4.5x", formatBoost(4.5f))
-        assertEquals("1.3x", formatBoost(1.26f))
-        assertEquals("Less than 1%", formatShare(0.004f))
-        assertEquals("8%", formatShare(0.081f))
-    }
-
-    @Test
-    fun previewWordsFollowWhatWillHappen() {
-        val item = ScreensTest.photo(0)
-        assertEquals("Working out the HDR version", previewHeadline(PreviewUi(item)))
-        assertNull(previewDetail(PreviewUi(item)))
-
-        val normal = PreviewUi(item, loading = false, peakBoost = 4.5f, boostedShare = 0.08f)
-        assertEquals("Highlights up to 4.5x brighter", previewHeadline(normal))
-        assertEquals("8% of the photo gets brighter. Hold the photo to compare with the original.", previewDetail(normal))
-        assertEquals(
-            "White marks the parts that get brighter, 8% of the photo. Black stays as it is.",
-            previewDetail(normal, PreviewMode.BOOST_MAP)
-        )
-
-        val tiny = normal.copy(boostedShare = 0.002f)
-        assertEquals(
-            "White marks the parts that get brighter, less than 1% of the photo. Black stays as it is.",
-            previewDetail(tiny, PreviewMode.BOOST_MAP)
-        )
-
-        assertEquals("This photo is already HDR", previewHeadline(normal.copy(alreadyHdr = true)))
-        assertEquals("Nothing here to boost", previewHeadline(normal.copy(noHighlights = true)))
     }
 }

@@ -4,10 +4,10 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
-// Samsung One UI 8.5/9 design tokens (Figma One UI Design Kit v4.0)
+// One UI tokens, from his One UI design system (One UI Design Kit v4.0) and the Knowledge app.
 val OneUiBlue = Color(0xFF387AFF)
 
-// Dark theme (kit page "black")
+// Dark: OLED black page, near-black containers.
 val OneUiDarkBg = Color(0xFF010102)
 val OneUiDarkCard = Color(0xFF17171A)
 val OneUiDarkContainer = Color(0xFF26262A)
@@ -15,7 +15,7 @@ val OneUiDarkDivider = Color(0xFF2B2B30)
 val OneUiDarkTextPrimary = Color(0xFFFFFFFF)
 val OneUiDarkAccentTint = Color(0xFF13244A)
 
-// Light theme (kit page "oneui")
+// Light: grey page, near-white containers.
 val OneUiLightBg = Color(0xFFF1F1F3)
 val OneUiLightCard = Color(0xFFFCFCFF)
 val OneUiLightContainer = Color(0xFFEAEAEA)
@@ -23,51 +23,56 @@ val OneUiLightDivider = Color(0xFFD4D4D8)
 val OneUiLightTextPrimary = Color(0xFF000000)
 val OneUiLightAccentTint = Color(0xFFE5EDFF)
 
-// Feedback
-val OneUiGreen = Color(0xFF1E8E4A)
-val OneUiRed = Color(0xFFD33A2C)
-val OneUiAmber = Color(0xFFE08700)
-
 /**
  * Colours the Material scheme has no slot for. Secondary text is a little darker (light theme) and
- * lighter (dark theme) than the kit's #848487, so small text passes 4.5:1 contrast on cards.
+ * lighter (dark theme) than the kit's #848487, so 14sp text passes 4.5:1 on containers.
  */
 @Immutable
 data class UhdrColors(
     val textSecondary: Color,
     val hairline: Color,
-    val segmentTrack: Color,
-    val segmentThumb: Color,
+    /** Text on a tonal button: the One UI blue, deepened or lightened to read on its tint. */
+    val accentInk: Color,
+    val accentTint: Color,
     val success: Color,
     val danger: Color,
-    val warning: Color,
-    val accentTint: Color,
-    /** The thin bright rim that makes a frosted surface read as glass. */
-    val glassEdge: Color
+    /** Floating toolbar and its pills: kit glass-toolbar, 14dp blur. */
+    val glassToolbar: Color,
+    /** Dialogs: kit glass, 24dp blur. */
+    val glassDialog: Color,
+    /** Chips over photos: kit glass-photo. */
+    val glassPhoto: Color,
+    val linePhoto: Color,
+    /** The progress rail's empty part. */
+    val rail: Color
 )
 
 val LightUhdrColors = UhdrColors(
-    textSecondary = Color(0xFF68686E),
-    hairline = Color(0x1F000000),
-    segmentTrack = Color(0xFFE9E9EC),
-    segmentThumb = Color(0xFFFFFFFF),
+    textSecondary = Color(0xFF6C6C72),
+    hairline = Color(0x14000000),
+    accentInk = Color(0xFF2E6BEB),
+    accentTint = OneUiLightAccentTint,
     success = Color(0xFF1A7F42),
     danger = Color(0xFFC8372A),
-    warning = Color(0xFFA86400),
-    accentTint = OneUiLightAccentTint,
-    glassEdge = Color(0xCCFFFFFF)
+    glassToolbar = Color(0x99FFFFFF),
+    glassDialog = Color(0xB3FCFCFF),
+    glassPhoto = Color(0x802E2E30),
+    linePhoto = Color(0x40FFFFFF),
+    rail = Color(0xFFE3E3E8)
 )
 
 val DarkUhdrColors = UhdrColors(
     textSecondary = Color(0xFF9D9DA3),
-    hairline = Color(0x24FFFFFF),
-    segmentTrack = Color(0xFF26262A),
-    segmentThumb = Color(0xFF45454B),
+    hairline = Color(0x17FFFFFF),
+    accentInk = Color(0xFF6E9DFF),
+    accentTint = OneUiDarkAccentTint,
     success = Color(0xFF45C278),
     danger = Color(0xFFFF6B5C),
-    warning = Color(0xFFF0A63A),
-    accentTint = OneUiDarkAccentTint,
-    glassEdge = Color(0x33FFFFFF)
+    glassToolbar = Color(0x9917171A),
+    glassDialog = Color(0xB317171A),
+    glassPhoto = Color(0x802E2E30),
+    linePhoto = Color(0x40FFFFFF),
+    rail = Color(0xFF2E2E33)
 )
 
 val LocalUhdrColors = staticCompositionLocalOf { LightUhdrColors }

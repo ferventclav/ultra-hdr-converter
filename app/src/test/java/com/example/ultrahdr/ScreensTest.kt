@@ -7,6 +7,11 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.net.Uri
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
@@ -14,7 +19,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -31,9 +38,7 @@ import com.example.ultrahdr.processing.PhotoTarget
 import com.example.ultrahdr.processing.UltraHdrEngine
 import com.example.ultrahdr.ui.Notice
 import com.example.ultrahdr.ui.Phase
-import com.example.ultrahdr.ui.PreviewMode
-import com.example.ultrahdr.ui.PreviewOverlay
-import com.example.ultrahdr.ui.PreviewUi
+import com.example.ultrahdr.ui.PromptCard
 import com.example.ultrahdr.ui.ScreenActions
 import com.example.ultrahdr.ui.UiState
 import com.example.ultrahdr.ui.UltraHdrScreen
@@ -66,105 +71,75 @@ class ScreensTest {
     // ---------------------------------------------------------------------------------- start
 
     @Test
-    fun empty() = screen("01_empty", UiState()) {
-        compose.onNodeWithText("Pick photos").assertIsDisplayed()
+    fun start() = screen("01_start", UiState()) {
+        compose.onNodeWithText("Select photos").assertIsDisplayed()
+        compose.onNodeWithText("Ultra HDR").assertIsDisplayed()
     }
 
     @Test
-    fun emptyDark() = screen("01_empty_dark", UiState(), dark = true)
-
-    // ---------------------------------------------------------------------------------- queue
+    fun startDark() = screen("01_start_dark", UiState(), dark = true)
 
     @Test
-    fun queue() = screen("02_queue", UiState(photos = sevenPhotos)) {
-        compose.onNodeWithText("Convert 7 photos").assertIsDisplayed()
-        compose.onNodeWithText("7 photos").assertIsDisplayed()
+    @Config(sdk = [34], qualifiers = TALL)
+    fun startWholePage() = screen("01_start_whole_page", UiState()) {
+        compose.onNodeWithText("Update without being asked").assertIsDisplayed()
     }
 
     @Test
-    fun queueDark() = screen("02_queue_dark", UiState(photos = sevenPhotos), dark = true)
-
-    @Test
     @Config(sdk = [34], qualifiers = TALL)
-    fun queueWholePage() = screen("02_queue_whole_page", UiState(photos = sevenPhotos))
+    fun startWithMediaManagementOn() = screen("01_start_whole_page_allowed", UiState(updatesWithoutAsking = true), dark = true) {
+        compose.onAllNodesWithText("Update without being asked").assertCountEquals(0)
+    }
 
     @Test
-    @Config(sdk = [34], qualifiers = TALL)
-    fun queueWholePageDark() = screen("02_queue_whole_page_dark", UiState(photos = sevenPhotos), dark = true)
-
-    @Test
-    @Config(sdk = [34], qualifiers = TALL)
-    fun queueAsCopies() = screen(
-        "03_queue_copies_vivid",
-        UiState(photos = sevenPhotos, replaceOriginal = false, strength = HdrStrength.VIVID)
-    )
-
-    @Test
-    fun queueStillChecking() = screen(
-        "04_queue_checking",
-        UiState(photos = (0 until 3).map { PhotoItem(uri(it), name = "Photo") })
+    fun preparing() = screen(
+        "02_preparing",
+        UiState(photos = (0 until 7).map { PhotoItem(uri(it), name = "Photo") }, phase = Phase.Preparing)
     ) {
-        compose.onNodeWithText("Checking photos").assertIsDisplayed()
-    }
-
-    @Test
-    fun onePhoto() = screen("05_queue_one_photo", UiState(photos = listOf(photo(0)))) {
-        compose.onNodeWithText("Convert 1 photo").assertIsDisplayed()
+        compose.onNodeWithText("Getting photos ready").assertIsDisplayed()
     }
 
     @Test
     fun declinedPermission() = screen(
-        "06_queue_notice",
-        UiState(
-            photos = sevenPhotos,
-            notice = Notice(
-                "Nothing was changed. To keep your originals as they are, turn off " +
-                    "\"Update original photos\" and HDR copies will be saved instead.",
-                isError = true
-            )
-        )
-    )
-
-    @Test
-    fun manyPhotos() = screen("07_queue_many", UiState(photos = (0 until 40).map { photo(it) }))
-
-    /** Scrolled, so photos sit under the floating bar and the frosted glass has something to blur. */
-    @Test
-    fun glassBarOverPhotos() = scrolledScreen("08_glass_bar", UiState(photos = (0 until 40).map { photo(it) }))
-
-    @Test
-    fun glassBarOverPhotosDark() =
-        scrolledScreen("08_glass_bar_dark", UiState(photos = (0 until 40).map { photo(it) }), dark = true)
-
-    @Test
-    fun glassBarWhileWorking() {
-        val photos = (0 until 40).map { photo(it) }
-        scrolledScreen(
-            "08_glass_bar_working",
-            UiState(
-                photos = photos,
-                results = (0 until 12).associate { uri(it) to updated(it) },
-                phase = Phase.Working(done = 12, total = 40, currentUri = uri(12), currentName = photo(12).name)
-            )
-        )
+        "03_declined",
+        UiState(photos = sevenPhotos)
+    ) {
+        compose.onNodeWithText("Try again").assertIsDisplayed()
     }
 
-    // -------------------------------------------------------------------------------- working
+    @Test
+    fun theOneQuestion() = card("04_prompt") {
+        PromptCard(blurred = false, onTurnOn = {}, onNotNow = {})
+    }
+
+    @Test
+    fun theOneQuestionDark() = card("04_prompt_dark", dark = true) {
+        PromptCard(blurred = false, onTurnOn = {}, onNotNow = {})
+    }
+
+    // ---------------------------------------------------------------------------------- working
+
+    @Test
+    fun glassBarOverPhotos() = scrolledScreen("08_glass_bar", manyWorking)
+
+    @Test
+    fun glassBarOverPhotosDark() = scrolledScreen("08_glass_bar_dark", manyWorking, dark = true)
 
     @Test
     fun working() = screen("10_working", workingState) {
         compose.onNodeWithText("Converting 4 of 7").assertIsDisplayed()
+        compose.onNodeWithText("Stop").assertIsDisplayed()
     }
 
     @Test
     fun workingDark() = screen("10_working_dark", workingState, dark = true)
 
-    // ------------------------------------------------------------------------------- finished
+    // ---------------------------------------------------------------------------------- finished
 
     @Test
     fun finished() = screen("20_finished", finishedState) {
-        compose.onNodeWithText("5 photos are now HDR").assertIsDisplayed()
         compose.onNodeWithText("Open in Gallery").assertIsDisplayed()
+        compose.onNodeWithText("5 photos are now HDR").assertIsDisplayed()
     }
 
     @Test
@@ -176,12 +151,10 @@ class ScreensTest {
 
     @Test
     fun finishedOneFailed() = screen(
-        "21_finished_failed",
+        "21_finished_one_failed",
         UiState(
-            photos = listOf(photo(3)),
-            results = mapOf(
-                uri(3) to PhotoResult(uri(3), photo(3).name, Outcome.FAILED, note = "This file isn't a picture the phone can read.")
-            ),
+            photos = listOf(photo(0)),
+            results = mapOf(uri(0) to PhotoResult(uri(0), photo(0).name, Outcome.FAILED, note = "Couldn't open this photo.")),
             phase = Phase.Finished(stopped = false)
         )
     ) {
@@ -190,105 +163,44 @@ class ScreensTest {
 
     @Test
     fun finishedNothingToDo() = screen(
-        "22_finished_nothing",
+        "22_finished_nothing_to_do",
         UiState(
-            photos = listOf(photo(2, hdr = true), photo(6)),
+            photos = listOf(photo(0, hdr = true), photo(1)),
             results = mapOf(
-                uri(2) to PhotoResult(uri(2), photo(2).name, Outcome.ALREADY_HDR),
-                uri(6) to PhotoResult(uri(6), photo(6).name, Outcome.NO_HIGHLIGHTS)
+                uri(0) to PhotoResult(uri(0), photo(0).name, Outcome.ALREADY_HDR),
+                uri(1) to PhotoResult(uri(1), photo(1).name, Outcome.NO_HIGHLIGHTS, note = "No bright highlights to boost, so it was left as it is.")
             ),
             phase = Phase.Finished(stopped = false)
         )
     ) {
-        compose.onNodeWithText("Nothing needed changing").assertIsDisplayed()
+        compose.onNodeWithText("Done").assertIsDisplayed()
     }
 
     @Test
     fun finishedAfterStop() = screen(
-        "23_finished_stopped",
+        "23_finished_after_stop",
         UiState(
             photos = sevenPhotos,
-            results = mapOf(
-                uri(0) to updated(0),
-                uri(1) to updated(1)
-            ),
+            results = mapOf(uri(0) to updated(0), uri(1) to updated(1)),
             phase = Phase.Finished(stopped = true)
         )
     ) {
         compose.onNodeWithText("5 not started").assertIsDisplayed()
     }
 
-    // -------------------------------------------------------------------------------- preview
-
-    @Test
-    fun preview() = overlay("30_preview_hdr", previewOf(TestScenes.SUNSET), headroom = 4f)
-
-    @Test
-    fun previewOnAScreenThatIsNotShowingHdr() {
-        overlay("31_preview_screen_not_hdr", previewOf(TestScenes.SUNSET), headroom = 1f)
-        compose.onNodeWithText("Your screen isn't showing HDR right now", substring = true).assertIsDisplayed()
-    }
-
-    @Test
-    fun previewSaysNothingAboutTheScreenWhenThePhoneCannotTell() {
-        overlay("38_preview_headroom_unknown", previewOf(TestScenes.SUNSET), headroom = null)
-        compose.onNodeWithText("Your screen isn't showing HDR right now", substring = true).assertDoesNotExist()
-        compose.onNodeWithText("Highlights up to", substring = true).assertIsDisplayed()
-    }
-
-    @Test
-    fun previewBoostMap() =
-        overlay("32_preview_boost_map", previewOf(TestScenes.NIGHT_STREET), headroom = 4f, mode = PreviewMode.BOOST_MAP)
-
-    @Test
-    fun previewPortrait() =
-        overlay("33_preview_portrait", previewOf(TestScenes.LAMP, width = 900, height = 1200), headroom = 4f)
-
-    @Test
-    fun previewLoading() = overlay("34_preview_loading", PreviewUi(photo(0)), headroom = 4f)
-
-    @Test
-    fun previewNothingToBoost() =
-        overlay("35_preview_no_highlights", previewOf(TestScenes.FOREST).copy(noHighlights = true, peakBoost = 1f), headroom = 4f)
-
-    @Test
-    fun previewAlreadyHdr() {
-        val base = TestScenes.bitmap(TestScenes.BEACH, 1200, 900)
-        overlay(
-            "36_preview_already_hdr",
-            PreviewUi(
-                photo(2, hdr = true), loading = false, original = base, hdr = base,
-                ambient = UltraHdrEngine.ambientWash(base), alreadyHdr = true
-            ),
-            headroom = 4f
-        )
-    }
-
-    @Test
-    fun previewFailed() =
-        overlay("37_preview_failed", PreviewUi(photo(0), loading = false, failed = true), headroom = 4f)
-
-    // ----------------------------------------------------------------------- other screen sizes
+    // ---------------------------------------------------------------------------------- other screens
 
     @Test
     @Config(sdk = [34], qualifiers = TABLET)
-    fun tabletQueue() = screen("40_tablet_queue", UiState(photos = sevenPhotos))
+    fun tabletStart() = screen("40_tablet_start", UiState())
 
     @Test
     @Config(sdk = [34], qualifiers = TABLET)
     fun tabletFinished() = screen("40_tablet_finished", finishedState, dark = true)
 
     @Test
-    @Config(sdk = [34], qualifiers = TABLET)
-    fun tabletPreview() = overlay("40_tablet_preview", previewOf(TestScenes.SUNSET), headroom = 4f)
-
-    @Test
     @Config(sdk = [34], qualifiers = PHONE_SIDEWAYS)
-    fun sidewaysQueue() = screen("41_sideways_queue", UiState(photos = sevenPhotos))
-
-    @Test
-    @Config(sdk = [34], qualifiers = PHONE_SIDEWAYS)
-    fun sidewaysPreview() = overlay("41_sideways_preview", previewOf(TestScenes.SUNSET), headroom = 1f)
+    fun sidewaysWorking() = screen("41_sideways_working", workingState)
 
     @Test
     @Config(sdk = [34], qualifiers = TABLET_SIDEWAYS)
@@ -300,12 +212,7 @@ class ScreensTest {
 
     @Test
     @Config(sdk = [34], qualifiers = SMALL_PHONE)
-    fun smallPhoneQueueWithLargeText() = screen("42_small_large_text_queue", UiState(photos = sevenPhotos), fontScale = 1.3f)
-
-    @Test
-    @Config(sdk = [34], qualifiers = SMALL_PHONE)
-    fun smallPhonePreviewWithLargeText() =
-        overlay("42_small_large_text_preview", previewOf(TestScenes.SUNSET), headroom = 1f, fontScale = 1.3f)
+    fun smallPhoneStartWithLargeText() = screen("42_small_large_text_start", UiState(), fontScale = 1.3f)
 
     // ------------------------------------------------------------------- what the maths decides
 
@@ -383,27 +290,12 @@ class ScreensTest {
         compose.onRoot().captureRoboImage("build/screens/$name.png")
     }
 
-    private fun overlay(
-        name: String,
-        preview: PreviewUi,
-        headroom: Float?,
-        mode: PreviewMode = PreviewMode.HDR,
-        fontScale: Float = 1f
-    ) {
+    private fun card(name: String, dark: Boolean = false, content: @Composable () -> Unit) {
         compose.setContent {
-            Scaled(fontScale) {
-                PreviewOverlay(
-                    preview = preview,
-                    strength = HdrStrength.BALANCED,
-                    screenHeadroom = headroom,
-                    onStrength = {},
-                    onClose = {},
-                    initialMode = mode
-                )
+            UltraHdrTheme(darkTheme = dark) {
+                Box(Modifier.background(MaterialTheme.colorScheme.background).padding(16.dp)) { content() }
             }
         }
-        // Past the moment the preview gives the screen to switch into HDR.
-        compose.mainClock.advanceTimeBy(2_000)
         compose.waitForIdle()
         compose.onRoot().captureRoboImage("build/screens/$name.png")
     }
@@ -420,20 +312,12 @@ class ScreensTest {
         Image(image, contentDescription = null, contentScale = ContentScale.Crop, modifier = modifier)
     }
 
-    private fun previewOf(kind: Int, width: Int = 1200, height: Int = 900): PreviewUi {
-        val base = TestScenes.bitmap(kind, width, height)
-        val plan = UltraHdrEngine.plan(base, HdrStrength.BALANCED)
-        val hdr = base.copy(Bitmap.Config.ARGB_8888, true)
-        // The PC has no HDR drawing, so a failure to attach must not stop the screen being drawn.
-        runCatching { UltraHdrEngine.attach(hdr, plan) }
-        return PreviewUi(
-            item = photo(kind), loading = false, original = base, hdr = hdr,
-            boostMap = UltraHdrEngine.gainMapPicture(plan),
-            ambient = UltraHdrEngine.ambientWash(base),
-            peakBoost = plan.peakBoost, boostedShare = plan.boostedShare,
-            noHighlights = !plan.hasVisibleEffect
+    private val manyWorking: UiState
+        get() = UiState(
+            photos = (0 until 40).map { photo(it) },
+            results = (0 until 12).associate { uri(it) to updated(it) },
+            phase = Phase.Working(done = 12, total = 40, currentUri = uri(12), currentName = photo(12).name)
         )
-    }
 
     private val workingState: UiState
         get() = UiState(

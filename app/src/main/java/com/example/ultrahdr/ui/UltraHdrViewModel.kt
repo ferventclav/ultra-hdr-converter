@@ -3,8 +3,6 @@ package com.example.ultrahdr.ui
 import android.app.Application
 import android.content.Context
 import android.content.IntentSender
-import android.graphics.Bitmap
-import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
@@ -14,12 +12,11 @@ import com.example.ultrahdr.processing.BatchConverter
 import com.example.ultrahdr.processing.ConvertOptions
 import com.example.ultrahdr.processing.CopyReport
 import com.example.ultrahdr.processing.HdrStrength
-import com.example.ultrahdr.processing.UltraHdrContainer
-import com.example.ultrahdr.processing.ImageExifHelper
 import com.example.ultrahdr.processing.MediaStoreSaver
 import com.example.ultrahdr.processing.PhotoItem
 import com.example.ultrahdr.processing.PhotoResult
 import com.example.ultrahdr.processing.RecoveryStore
+import com.example.ultrahdr.processing.UltraHdrContainer
 import com.example.ultrahdr.processing.UltraHdrEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +32,8 @@ import kotlinx.coroutines.launch
 
 sealed interface Phase {
     data object Idle : Phase
+    /** Photos picked: being looked at, or waiting for Android's say-so. Conversion starts by itself. */
+    data object Preparing : Phase
     data class Working(val done: Int, val total: Int, val currentUri: Uri?, val currentName: String) : Phase
     /** [stopped] is true when the person pressed Stop before the end. */
     data class Finished(val stopped: Boolean) : Phase
@@ -42,53 +41,35 @@ sealed interface Phase {
 
 data class Notice(val text: String, val isError: Boolean)
 
-/** What the full-screen preview shows for one photo. */
-data class PreviewUi(
-    val item: PhotoItem,
-    val loading: Boolean = true,
-    val failed: Boolean = false,
-    val original: Bitmap? = null,
-    val hdr: Bitmap? = null,
-    val boostMap: Bitmap? = null,
-    /** A tiny copy of the photo, drawn blurred across the whole screen behind it. */
-    val ambient: Bitmap? = null,
-    val peakBoost: Float = 1f,
-    val boostedShare: Float = 0f,
-    val alreadyHdr: Boolean = false,
-    val noHighlights: Boolean = false
-)
-
 data class UiState(
     val photos: List<PhotoItem> = emptyList(),
     val results: Map<Uri, PhotoResult> = emptyMap(),
     val phase: Phase = Phase.Idle,
-    val strength: HdrStrength = HdrStrength.BALANCED,
-    val replaceOriginal: Boolean = true,
-    /** Convert again the photos an earlier version added its gain map to without re-saving them. */
-    val redo: Boolean = false,
     val notice: Notice? = null,
-    val preview: PreviewUi? = null
+    /** Android lets this app update photos without asking first (media management is on). */
+    val updatesWithoutAsking: Boolean = false,
+    /** The one-time question about turning media management on, shown before the first conversion. */
+    val askAboutPrompts: Boolean = false
 )
 
 sealed class UiEvent {
     data class RequestWritePermission(val intentSender: IntentSender) : UiEvent()
+    /** Opens Android's "Media management" page for this app. */
+    data object OpenMediaManagement : UiEvent()
 }
 
+/**
+ * Fully automatic: picking or sharing photos converts them straight away, the way version 1.9 did,
+ * with no settings. Originals are updated where they are, photos an earlier version converted are
+ * done again, and photos that are HDR already are never touched.
+ */
 class UltraHdrViewModel(application: Application) : AndroidViewModel(application) {
 
     private val context: Context = application.applicationContext
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val converter = BatchConverter(context)
 
-    private val _state = MutableStateFlow(
-        UiState(
-            strength = runCatching {
-                HdrStrength.valueOf(prefs.getString(KEY_STRENGTH, null) ?: HdrStrength.BALANCED.name)
-            }.getOrDefault(HdrStrength.BALANCED),
-            replaceOriginal = prefs.getBoolean(KEY_REPLACE, true),
-            redo = prefs.getBoolean(KEY_REDO, false)
-        )
-    )
+    private val _state = MutableStateFlow(UiState(updatesWithoutAsking = canSkipPrompts()))
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val _events = MutableSharedFlow<UiEvent>()
@@ -96,8 +77,6 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
 
     private var checkJob: Job? = null
     private var convertJob: Job? = null
-    private var previewJob: Job? = null
-    private var previewBase: Bitmap? = null
 
     /** If the app was killed half way through an in-place update last time, put the original back first. */
     private val recoveryJob: Job = viewModelScope.launch(Dispatchers.IO) {
@@ -113,28 +92,38 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
     }
 
     // ------------------------------------------------------------------------------------------
-    // Queue
+    // Photos in
     // ------------------------------------------------------------------------------------------
 
+    /** Picked or shared photos start a new batch, which converts by itself. */
     fun addPhotos(uris: List<Uri>) {
-        if (_state.value.phase is Phase.Working) return
-        // Adding photos after a finished run starts a new one.
-        if (_state.value.phase is Phase.Finished) {
-            _state.update { it.copy(photos = emptyList(), results = emptyMap(), phase = Phase.Idle) }
-        }
-        val known = _state.value.photos.map { it.uri }.toSet()
-        val fresh = uris.distinct().filter { it !in known }
+        val phase = _state.value.phase
+        if (phase is Phase.Working || phase is Phase.Preparing) return
+        val fresh = uris.distinct()
         if (fresh.isEmpty()) return
-        _state.update { s -> s.copy(photos = s.photos + fresh.map { PhotoItem(it, name = "Photo") }, notice = null) }
+        _state.update {
+            it.copy(
+                photos = fresh.map { uri -> PhotoItem(uri, name = "Photo") },
+                results = emptyMap(),
+                notice = null,
+                phase = Phase.Preparing
+            )
+        }
 
-        // Look at each new photo off the main thread: its name, where it lives, whether it is HDR already.
-        val previous = checkJob
+        // Look at each photo off the main thread: its name, where it lives, whether it is HDR already.
+        checkJob?.cancel()
         checkJob = viewModelScope.launch(Dispatchers.IO) {
-            previous?.join()
             for (uri in fresh) {
                 val checked = check(uri)
                 _state.update { s -> s.copy(photos = s.photos.map { if (it.uri == uri) checked else it }) }
             }
+        }
+
+        if (!_state.value.updatesWithoutAsking && !prefs.getBoolean(KEY_ASKED_ABOUT_PROMPTS, false)) {
+            // Asked once, before the first conversion. The answer starts the batch.
+            _state.update { it.copy(askAboutPrompts = true) }
+        } else {
+            convert()
         }
     }
 
@@ -152,53 +141,50 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
         val redoable = alreadyHdr && runCatching { UltraHdrContainer.strip(bytes!!) != null }.getOrDefault(false)
         return PhotoItem(uri = uri, name = name, checked = true, target = target, alreadyHdr = alreadyHdr, redoable = redoable)
     }
-    fun removePhoto(uri: Uri) {
-        if (_state.value.phase !is Phase.Idle) return
-        _state.update { s -> s.copy(photos = s.photos.filterNot { it.uri == uri }) }
-    }
 
+    /** Leaves a batch that was not started, or the result screen. */
     fun clearPhotos() {
-        if (_state.value.phase !is Phase.Idle) return
-        _state.update { it.copy(photos = emptyList(), results = emptyMap()) }
+        if (_state.value.phase is Phase.Working) return
+        checkJob?.cancel()
+        convertJob?.cancel()
+        _state.update { it.copy(photos = emptyList(), results = emptyMap(), phase = Phase.Idle, notice = null, askAboutPrompts = false) }
     }
 
     // ------------------------------------------------------------------------------------------
-    // Settings
+    // Updating without being asked
     // ------------------------------------------------------------------------------------------
 
-    fun setStrength(strength: HdrStrength) {
-        if (_state.value.strength == strength) return
-        _state.update { it.copy(strength = strength) }
-        prefs.edit().putString(KEY_STRENGTH, strength.name).apply()
-        if (_state.value.preview != null) renderPreview()
+    /**
+     * With media management on, Android's "Allow this app to modify these photos?" request is
+     * granted straight away, without a dialog. All files access, granted to an older version, does
+     * the same.
+     */
+    private fun canSkipPrompts(): Boolean =
+        runCatching { MediaStore.canManageMedia(context) }.getOrDefault(false) ||
+            runCatching { Environment.isExternalStorageManager() }.getOrDefault(false)
+
+    /** Called when the app comes back to the front: the person may have changed it in Settings. */
+    fun refreshAccess() {
+        val now = canSkipPrompts()
+        if (now != _state.value.updatesWithoutAsking) _state.update { it.copy(updatesWithoutAsking = now) }
     }
 
-    fun setReplaceOriginal(enabled: Boolean) {
-        _state.update { it.copy(replaceOriginal = enabled) }
-        prefs.edit().putBoolean(KEY_REPLACE, enabled).apply()
+    fun openMediaManagement() {
+        prefs.edit().putBoolean(KEY_ASKED_ABOUT_PROMPTS, true).apply()
+        _state.update { it.copy(askAboutPrompts = false) }
+        viewModelScope.launch { _events.emit(UiEvent.OpenMediaManagement) }
     }
 
-    fun setRedo(enabled: Boolean) {
-        _state.update { it.copy(redo = enabled) }
-        prefs.edit().putBoolean(KEY_REDO, enabled).apply()
+    /** Back from Settings. A batch waiting on the answer goes ahead either way. */
+    fun onMediaManagementResult() {
+        refreshAccess()
+        if (_state.value.phase is Phase.Preparing && convertJob?.isActive != true) convert()
     }
 
-    /** Plain text for the clipboard: what happened to each photo and why. */
-    fun copyReport(): String {
-        val s = _state.value
-        val version = runCatching {
-            val info = context.packageManager.getPackageInfo(context.packageName, 0)
-            "${info.versionName} (${info.longVersionCode})"
-        }.getOrDefault("?")
-        val header = "Ultra HDR Converter $version | ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} | " +
-            "Android ${android.os.Build.VERSION.RELEASE} | update originals ${if (s.replaceOriginal) "on" else "off"} | " +
-            "redo ${if (s.redo) "on" else "off"} | ${s.strength.name.lowercase()}"
-        val ordered = s.photos.mapNotNull { s.results[it.uri] }
-        return CopyReport.build(header, ordered)
-    }
-
-    fun dismissNotice() {
-        _state.update { it.copy(notice = null) }
+    fun notNow() {
+        prefs.edit().putBoolean(KEY_ASKED_ABOUT_PROMPTS, true).apply()
+        _state.update { it.copy(askAboutPrompts = false) }
+        if (_state.value.phase is Phase.Preparing) convert()
     }
 
     // ------------------------------------------------------------------------------------------
@@ -206,19 +192,20 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
     // ------------------------------------------------------------------------------------------
 
     /**
-     * Starts the batch. Updating originals needs the person's say-so first, which Android asks for
-     * in one system dialog covering every photo.
+     * Starts the batch. Updating originals needs Android's say-so first: one request covering every
+     * photo, answered without a dialog when media management is on.
      */
     fun convert() {
         if (_state.value.phase is Phase.Working || convertJob?.isActive == true) return
         if (_state.value.photos.isEmpty()) return
+        _state.update { it.copy(phase = Phase.Preparing, notice = null) }
         convertJob = viewModelScope.launch {
             recoveryJob.join()
             checkJob?.join()
             val current = _state.value
-            if (current.replaceOriginal && !Environment.isExternalStorageManager()) {
+            if (!runCatching { Environment.isExternalStorageManager() }.getOrDefault(false)) {
                 val needConsent = current.photos
-                    .filter { !it.alreadyHdr || (current.redo && it.redoable) }
+                    .filter { !it.alreadyHdr || it.redoable }
                     .mapNotNull { it.target?.mediaUri }
                     .distinct()
                 if (needConsent.isNotEmpty()) {
@@ -239,33 +226,21 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
         if (granted) {
             convertJob = viewModelScope.launch { run() }
         } else {
-            _state.update {
-                it.copy(
-                    notice = Notice(
-                        "Nothing was changed. To keep your originals as they are, turn off " +
-                            "\"Update original photos\" and HDR copies will be saved instead.",
-                        isError = true
-                    )
-                )
-            }
+            // The header says what happened and the toolbar offers Try again; no notice needed.
+            _state.update { it.copy(phase = Phase.Idle) }
         }
     }
 
     private suspend fun run() {
-        val start = _state.value
-        val photos = start.photos
+        val photos = _state.value.photos
         if (photos.isEmpty()) return
         _state.update {
-            it.copy(results = emptyMap(), notice = null, preview = null, phase = Phase.Working(0, photos.size, null, ""))
+            it.copy(results = emptyMap(), notice = null, phase = Phase.Working(0, photos.size, null, ""))
         }
         try {
             converter.convertAll(
                 items = photos,
-                options = ConvertOptions(
-                    replaceOriginal = start.replaceOriginal,
-                    strength = start.strength,
-                    redo = start.redo
-                ),
+                options = AUTOMATIC,
                 onStart = { index, item ->
                     _state.update { it.copy(phase = Phase.Working(index, photos.size, item.uri, item.name)) }
                 },
@@ -302,89 +277,29 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(photos = emptyList(), results = emptyMap(), phase = Phase.Idle) }
     }
 
-    // ------------------------------------------------------------------------------------------
-    // Preview
-    // ------------------------------------------------------------------------------------------
-
-    fun openPreview(item: PhotoItem) {
-        previewJob?.cancel()
-        previewBase = null
-        _state.update { it.copy(preview = PreviewUi(item)) }
-        previewJob = viewModelScope.launch(Dispatchers.Default) {
-            val base = loadForPreview(item.uri)
-            if (base == null) {
-                _state.update { s -> s.copy(preview = s.preview?.copy(loading = false, failed = true)) }
-                return@launch
-            }
-            previewBase = base
-            buildPreview(base)
-        }
+    fun dismissNotice() {
+        _state.update { it.copy(notice = null) }
     }
 
-    private fun renderPreview() {
-        val base = previewBase ?: return
-        previewJob?.cancel()
-        previewJob = viewModelScope.launch(Dispatchers.Default) { buildPreview(base) }
-    }
-
-    private fun buildPreview(base: Bitmap) {
-        val strength = _state.value.strength
-        val result = runCatching {
-            // Made once per photo and kept when only the strength changes.
-            val ambient = _state.value.preview?.ambient
-                ?: runCatching { UltraHdrEngine.ambientWash(base) }.getOrNull()
-            if (base.hasGainmap()) {
-                // Already HDR: show it as it is next to a plain version of itself.
-                val plain = base.copy(Bitmap.Config.ARGB_8888, true).apply { gainmap = null }
-                PreviewUi(
-                    item = _state.value.preview?.item ?: return, loading = false,
-                    original = plain, hdr = base, ambient = ambient, alreadyHdr = true
-                )
-            } else {
-                val plan = UltraHdrEngine.plan(base, strength)
-                val hdr = base.copy(Bitmap.Config.ARGB_8888, true)
-                UltraHdrEngine.attach(hdr, plan)
-                PreviewUi(
-                    item = _state.value.preview?.item ?: return, loading = false,
-                    original = base, hdr = hdr, boostMap = UltraHdrEngine.gainMapPicture(plan),
-                    ambient = ambient,
-                    peakBoost = plan.peakBoost, boostedShare = plan.boostedShare,
-                    noHighlights = !plan.hasVisibleEffect
-                )
-            }
-        }.getOrNull()
-        _state.update { s ->
-            val open = s.preview ?: return@update s
-            s.copy(preview = result ?: open.copy(loading = false, failed = true))
-        }
-    }
-
-    /** The photo, upright, at about screen size. */
-    private fun loadForPreview(uri: Uri): Bitmap? = try {
-        val source = ImageDecoder.createSource(context.contentResolver, uri)
-        ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-            val longSide = maxOf(info.size.width, info.size.height)
-            var sample = 1
-            while (longSide / sample > PREVIEW_MAX_SIDE) sample *= 2
-            decoder.setTargetSampleSize(sample)
-        }
-    } catch (_: Throwable) {
-        null
-    }
-
-    fun closePreview() {
-        previewJob?.cancel()
-        previewBase = null
-        _state.update { it.copy(preview = null) }
+    /** Plain text for the clipboard: what happened to each photo and why. */
+    fun copyReport(): String {
+        val s = _state.value
+        val version = runCatching {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            "${info.versionName} (${info.longVersionCode})"
+        }.getOrDefault("?")
+        val header = "Ultra HDR Converter $version | ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} | " +
+            "Android ${android.os.Build.VERSION.RELEASE} | automatic | " +
+            "media management ${if (s.updatesWithoutAsking) "on" else "off"}"
+        val ordered = s.photos.mapNotNull { s.results[it.uri] }
+        return CopyReport.build(header, ordered)
     }
 
     private fun photos(count: Int) = if (count == 1) "1 original photo was" else "$count original photos were"
 
     private companion object {
-        const val KEY_STRENGTH = "strength"
-        const val KEY_REPLACE = "replace_original"
-        const val KEY_REDO = "redo_earlier"
-        const val PREVIEW_MAX_SIDE = 2400
+        /** Version 1.9's look, originals updated in place, earlier conversions done again. */
+        val AUTOMATIC = ConvertOptions(replaceOriginal = true, strength = HdrStrength.BALANCED, redo = true)
+        const val KEY_ASKED_ABOUT_PROMPTS = "asked_about_prompts"
     }
 }

@@ -1,10 +1,12 @@
 package com.example.ultrahdr
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -28,12 +30,17 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { /* The app works either way: without access, photos are saved as copies. */ }
 
-    /** Android's own "Allow this app to modify N photos?" dialog. */
+    /** Android's own "Allow this app to modify N photos?" dialog. With media management on, no dialog shows. */
     private val writeRequestLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         viewModel.onWritePermissionResult(granted = result.resultCode == RESULT_OK)
     }
+
+    /** Settings, Apps, Special access, Media management, for this app only. */
+    private val mediaManagementLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { viewModel.onMediaManagementResult() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -52,6 +59,7 @@ class MainActivity : ComponentActivity() {
                         is UiEvent.RequestWritePermission -> writeRequestLauncher.launch(
                             IntentSenderRequest.Builder(event.intentSender).build()
                         )
+                        UiEvent.OpenMediaManagement -> openMediaManagement()
                     }
                 }
             }
@@ -83,6 +91,28 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.ACCESS_MEDIA_LOCATION
             )
         )
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Media management may have been turned on or off in Settings meanwhile.
+        viewModel.refreshAccess()
+    }
+
+    private fun openMediaManagement() {
+        val forThisApp = Uri.fromParts("package", packageName, null)
+        val pages = listOf(
+            Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA, forThisApp),
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, forThisApp)
+        )
+        for (page in pages) {
+            try {
+                mediaManagementLauncher.launch(page)
+                return
+            } catch (_: ActivityNotFoundException) {
+            }
+        }
+        viewModel.onMediaManagementResult()
     }
 
     override fun onNewIntent(intent: Intent) {
