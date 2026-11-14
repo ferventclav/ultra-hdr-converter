@@ -146,7 +146,7 @@ internal object UltraHdrEngine {
 
     /**
      * Decodes [staged] and saves it again as a new Ultra HDR JPEG through the platform encoder.
-     * Used only for copies of files that can't be handled losslessly (HEIC, PNG, unusual JPEGs).
+     * This is version 1.9's conversion and the one every photo goes through.
      */
     fun writeReencoded(staged: File, strength: HdrStrength, out: File, quality: Int = 96): Reencoded? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

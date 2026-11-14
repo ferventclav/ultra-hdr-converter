@@ -1,129 +1,121 @@
+<img src="tools/icon_art.jpg" alt="Ultra HDR icon" width="96" align="right">
+
 # Ultra HDR Converter
 
-An Android app (Android 14 and up) that gives ordinary photos real HDR highlights. Pick photos, or
-share them to the app from Gallery, and the bright parts (sun, lamps, sky through leaves,
-reflections) glow on an HDR screen the way a new phone-camera photo does. On a normal screen the
-photos look exactly as before.
+An Android app (Android 14 and up) that turns ordinary photos into Ultra HDR photos. Pick photos,
+or share them to the app from Gallery, and it converts them straight away. On an HDR screen the
+bright parts (sun, lamps, sky, reflections) then glow brighter than white. On a normal screen the
+photos look as before.
 
-Version 2.0. Package `com.example.ultrahdr`.
+There are no settings. Version 2.4, package `com.example.ultrahdr`. Built for a Samsung Galaxy
+running One UI, and it should work on any Android 14 phone that shows Ultra HDR photos.
 
-## What it does to a photo
+## What happens to a photo
 
-An Ultra HDR photo is a normal JPEG with a second, small grey picture stored behind it, called a
-gain map. White in the gain map means "show this part brighter than normal white". The app works
-out that map for a photo that has none.
-
-The rule the whole app is built around: **the original picture data is never re-compressed.**
-The gain map and a few small header blocks are added around the JPEG the camera wrote, and every
-byte of the picture itself stays the same. So converting costs no quality, and file size grows by
-well under 1 MB.
+An Ultra HDR photo is a JPEG with a small grey picture stored behind it, called a gain map. White
+in the gain map means "show this part brighter than normal white". The app works out a gain map
+for a photo that has none and saves the photo again with it.
 
 | Photo | What happens |
 | --- | --- |
 | JPEG stored on the phone | Updated where it is. Same file, same place in Gallery. |
-| Already HDR | Skipped. |
-| No bright highlights at all | Skipped, because nothing would change. |
-| Cloud photo, HEIC or PNG, motion photo, unusual JPEG | Original left alone. An HDR copy is saved to `Pictures/UltraHDR`. |
-| "Update original photos" switched off | Every photo is saved as a copy. |
+| Already HDR (camera or another app) | Skipped, never touched. |
+| HDR added by version 2.0 of this app | Its gain map is taken out and the photo is converted again. |
+| No bright highlights | Skipped, because nothing would change. |
+| Cloud photo | An HDR copy is saved to `Pictures/UltraHDR`. |
+| Not a JPEG, motion photo, over 26 MP, or the real file can't be found | Left alone, with the reason on the result screen. |
 
-Before an original is touched, three things must be true: the new file keeps the picture data
-byte for byte, the phone's own decoder confirms the new file is an Ultra HDR photo, and the file
-on disk is the same photo that was read. If any of them fails, the original is left alone and a
-copy is saved, with the reason shown on the result screen.
+Each photo is decoded upright, given its gain map, saved as a JPEG at quality 96 with its EXIF
+data (including GPS) copied over, and written back in place. Before anything is replaced, the
+phone's own decoder must confirm the new file is an Ultra HDR photo. While the original is being
+rewritten, a backup of it sits in the app's private storage; if the app is killed in that moment,
+the next launch puts the original back. A batch can only stop between photos, never part way
+through one.
 
-While an original is being rewritten, a backup of it sits in the app's private storage. If the app
-is killed or the phone dies in that moment, the next launch puts the original back.
+## The gain map
 
-## How the gain map is worked out
+`GainMapSynth` (plain Kotlin, no Android code) is version 1.9's method, kept exactly because it is
+the one that was judged on a real phone:
 
-`GainMapSynth` (plain Kotlin, no Android code):
+- plain brightness decides everything; colour, however saturated, never counts as a highlight
+- the boost starts at the photo's own 85th percentile, and never below a floor that keeps skin
+  and midtones out of it
+- it rises steeply, so only the top of the range moves
+- the map is worked out at up to 1280 px on the long side; nothing is blurred
 
-1. Brightness per pixel, mostly luminance, so skin and coloured objects are not boosted. A colour
-   channel that has hit its ceiling (sunsets, flames) still counts as a highlight.
-2. A light blur, so the boost follows shapes and not noise.
-3. A starting point (the "knee") taken from the photo itself: a bright photo starts boosting
-   higher up, so only its real highlights move.
-4. A smooth curve from the knee to white.
-5. A cap on the peak that depends on how much of the photo is bright. A small sparkle can reach
-   the full strength. A sky or a snowfield gets less. A page of text only gets a slight lift.
+`V19ParityTest` checks the output against version 1.9's own code, gain byte for gain byte.
 
-Strength settings: Subtle (up to 3x), Balanced (up to 4.5x, the default), Vivid (up to 6x).
+## Permissions
 
-## The file format
-
-`UltraHdrContainer` writes the same three things a Galaxy or Pixel camera writes, so any reader
-finds the gain map whichever way it looks for it:
-
-- XMP with `hdrgm:Version` and a `Container:Directory` listing the primary image and the gain map
-- an ISO 21496-1 block (version in the primary image, the numbers in the gain map image)
-- an MPF index pointing at the gain map
-
-Existing XMP is kept and extended, not replaced. Anything after the photo (for example Samsung's
-own trailer) is kept after the gain map.
+| Permission | Why |
+| --- | --- |
+| Photos (full or limited access) | Find the real file behind a picked photo, so it can be updated where it is. |
+| Photo location | Read a photo complete with its GPS position, so the position survives the update. |
+| Media management (Settings, Apps, Special access) | Optional. Once on, Android lets the app update photos without asking for each batch. The start screen offers it while it is off. |
 
 ## Project map
 
 ```
 app/src/main/java/com/example/ultrahdr/
-  MainActivity.kt              permissions, share intents, Android's "allow changes" dialog
+  MainActivity.kt              permissions, share intents, media management
   processing/
+    BatchConverter.kt          one photo at a time: HDR check, where it may go, convert, save
+    SaveDecision.kt            in place, copy or leave alone, and the Copy report text
     GainMapSynth.kt            which parts get brighter, and by how much
-    UltraHdrContainer.kt       reading a JPEG's layout and writing the Ultra HDR version
-    UltraHdrEngine.kt          Android side: decoding, gain map pictures, the self-check
-    BatchConverter.kt          the decision for each photo: update, copy, skip or fail
+    UltraHdrEngine.kt          decoding, attaching the gain map, the decoder check
+    UltraHdrContainer.kt       reading a JPEG's layout; taking out version 2.0's gain map
     MediaStoreSaver.kt         finding the real file, safe in-place writes, saving copies
     RecoveryStore.kt           the backup that survives a crash mid-write
-    ImageExifHelper.kt         capture date, metadata for re-saved copies
-    JpegMpfFixer.kt            repairs the MPF index after EXIF edits (re-saved copies only)
+    ImageExifHelper.kt         upright decoding, capture date, EXIF copy
+    JpegMpfFixer.kt            repairs the MPF index after EXIF edits
+    Models.kt                  photo, outcome and result types
   ui/
-    UltraHdrViewModel.kt       state, queue checks, preview, settings
-    UltraHdrScreen.kt          the main screen
-    PreviewOverlay.kt          full-screen before/after and boost map
-    Components.kt              card, segmented picker, photo tile
+    UltraHdrViewModel.kt       queue, background checks, conversion, Copy report
+    UltraHdrScreen.kt          the one screen: empty state, photo grid, results
+    Components.kt, Glass.kt    One UI buttons, rows, tiles, glass toolbar and dialogs
     ResultSummary.kt           the wording of the result card
-    theme/                     One UI colours, type and shapes
+    theme/                     One UI colours (the accent follows the wallpaper), type, shapes
+tools/
+  icon.py                      cuts icon_art.jpg into the adaptive icon layers
 ```
 
-## Build and test on this PC
+## Build and test
 
-There is no Gradle wrapper. The toolchain lives in `C:\Users\bahni\.android-build`
-(JDK 17, Gradle 8.9, Android SDK 35). In PowerShell:
+There is no Gradle wrapper script. You need JDK 17, Gradle 8.9 and the Android SDK (platform 35).
+Point `ANDROID_HOME` at the SDK, or set `sdk.dir` in `local.properties`, then:
 
 ```powershell
-$env:JAVA_HOME = "C:\Users\bahni\.android-build\jdk-17.0.20.1+1"
-$env:ANDROID_HOME = "C:\Users\bahni\.android-build\sdk"
-$env:Path = "$env:JAVA_HOME\bin;C:\Users\bahni\.android-build\gradle-8.9\bin;$env:Path"
-
 gradle assembleDebug                      # app\build\outputs\apk\debug\app-debug.apk
 gradle testDebugUnitTest                  # all tests
 gradle testDebugUnitTest -Pscreenshots    # also saves every screen as a PNG in app\build\screens
 ```
 
-The tests run on the PC through Robolectric, with Android's real picture decoder:
+The tests run on a PC through Robolectric, with Android's real picture decoder:
 
-- `GainMapSynthTest`: the look. Highlights get the boost, skin and mid-tones stay put, a white
-  page only gets a slight lift.
-- `UltraHdrContainerTest`: the file. The output is read back by a separate reader written the way
-  Android's decoder looks for gain maps, the original bytes are checked to be intact, and odd
-  inputs (motion photos, multi-picture files, broken files, unsafe XMP) are refused.
-- `ScreensTest`: draws every state of the app at phone, tablet, sideways and large-text sizes,
-  with painted stand-in photos.
-- `ResultSummaryTest`, `LogicTest`: wording, and the older MPF and detection checks.
+- `GainMapSynthTest`, `V19ParityTest`: the look, and that it matches version 1.9 exactly
+- `ConversionRulesTest`: where each kind of photo goes, HDR detection, taking out version 2.0's
+  gain map, GPS kept after conversion, the Copy report
+- `UltraHdrContainerTest`: reading JPEG layouts and refusing odd files
+- `ScreensTest`: every screen at phone, tablet, sideways and large-text sizes, light and dark
+- `ResultSummaryTest`, `LogicTest`: wording, MPF and detection checks
 
-Two container tests use a real camera file when one is supplied:
+Two container tests use a real camera file when one is supplied, and are skipped otherwise:
 
 ```powershell
 $env:UHDR_SAMPLE = "C:\path\to\a real Ultra HDR photo.jpg"
 ```
 
-Without it they are skipped. The PC cannot show or decode HDR itself, so what stays untested here
-is the phone's side: the self-check with the phone's decoder, the system permission dialog, and
-how the result looks on an HDR screen.
+A PC cannot show HDR, so how a converted photo looks can only be judged on a phone.
+
+## The icon
+
+`python tools/icon.py app/src/main/res preview.png` rebuilds the launcher icon from
+`tools/icon_art.jpg`: a flat background, the art with its black taken out as the foreground
+(scaled into the 66dp safe zone), and a monochrome layer for themed icons.
 
 ## Known limits
 
-- Very long batches run while the app is open. There is no background service, so keep the app on
-  screen until it finishes.
-- There is no "remove HDR" button. A copy of the original is the way back when that matters:
-  switch off "Update original photos".
+- An updated photo replaces the original. The safety backup is deleted once the new file is in
+  place, so there is no undo.
+- Long batches run while the app is open. There is no background service.
 - Text on screen is in the code, not in string resources, so the app is English only.
