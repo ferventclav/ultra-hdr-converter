@@ -64,7 +64,8 @@ object CopyReport {
             "real file ${if (t.realFileFound) "found" else "not found"}",
             "bytes ${t.bytesFrom.ifEmpty { "-" }}",
             "hdr checks ${t.hdrChecks.joinToString("+").ifEmpty { "none" }}",
-            "size ${size(t.sizeBefore)} -> ${size(t.sizeAfter)}"
+            "size ${size(t.sizeBefore)} -> ${size(t.sizeAfter)}",
+            "metadata ${t.metadataBefore.ifEmpty { "-" }} -> ${t.metadataAfter.ifEmpty { "-" }}"
         ).joinToString(" | ")
     }
 

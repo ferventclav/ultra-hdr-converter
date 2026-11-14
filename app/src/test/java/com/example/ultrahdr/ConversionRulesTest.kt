@@ -31,6 +31,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 /** The Milestone 1 rules: where photos may be saved, what counts as HDR already, and undoing v2.0. */
 @RunWith(RobolectricTestRunner::class)
@@ -156,7 +158,7 @@ class ConversionRulesTest {
     fun gpsIsStillThereAfterConversion() {
         val staged = tmp.newFile("in.jpg").apply { writeBytes(sceneJpeg(TestScenes.BEACH, 800, 600)) }
         ExifInterface(staged.absolutePath).apply {
-            setLatLong(22.8046, 86.2029)
+            setLatLong(48.8584, 2.2945)
             setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_ROTATE_90.toString())
             saveAttributes()
         }
@@ -166,11 +168,26 @@ class ConversionRulesTest {
         val exif = ExifInterface(out.absolutePath)
         val latLong = exif.latLong
         assertNotNull("GPS kept", latLong)
-        assertEquals(22.8046, latLong!![0], 1e-4)
-        assertEquals(86.2029, latLong[1], 1e-4)
+        assertEquals(48.8584, latLong!![0], 1e-4)
+        assertEquals(2.2945, latLong[1], 1e-4)
         // Saved upright, so the label says normal and the picture is now portrait.
         assertEquals(ExifInterface.ORIENTATION_NORMAL, exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, -1))
         assertEquals(600, exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, -1).let { if (it > 0) it else 600 })
+    }
+
+    @Test
+    fun aPhotoWithNoDateGetsTheProviderDateAndStaysHdr() {
+        val file = tmp.newFile("nodate.jpg").apply { writeBytes(losslessFrom(sceneJpeg(TestScenes.LAMP, 800, 600))) }
+        assertEquals("none", ImageExifHelper.metadataKinds(file))
+        val checksBefore = UltraHdrEngine.hdrChecks(file.readBytes())
+        assertTrue(checksBefore.isNotEmpty())
+
+        val takenAt = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse("2026:11:14 23:15:00")!!.time
+        ImageExifHelper.stampCaptureTime(file, takenAt)
+
+        assertEquals(takenAt, ImageExifHelper.getCaptureTimestamp(file))
+        assertEquals("date", ImageExifHelper.metadataKinds(file))
+        assertEquals("the gain map is still found the same ways", checksBefore, UltraHdrEngine.hdrChecks(file.readBytes()))
     }
 
     // ---------------------------------------------------------------------------------------
@@ -287,14 +304,17 @@ class ConversionRulesTest {
             name = "20261114_190629.jpg",
             outcome = Outcome.ALREADY_HDR,
             note = "Already HDR, left as it is.",
-            trace = Trace("picker", true, "real file", listOf("queue", "markers", "decoder"), 7_684_869, -1)
+            trace = Trace(
+                "picker", true, "real file", listOf("queue", "markers", "decoder"), 7_684_869, -1,
+                metadataBefore = "date+camera+gps"
+            )
         )
         val text = CopyReport.build("Ultra HDR Converter 2.1 (12)", listOf(result))
         val lines = text.lines()
         assertEquals(2, lines.size)
         assertEquals(
             "20261114_190629.jpg | already_hdr | Already HDR, left as it is. | from picker | real file found | " +
-                "bytes real file | hdr checks queue+markers+decoder | size 7684869 -> -",
+                "bytes real file | hdr checks queue+markers+decoder | size 7684869 -> - | metadata date+camera+gps -> -",
             lines[1]
         )
     }

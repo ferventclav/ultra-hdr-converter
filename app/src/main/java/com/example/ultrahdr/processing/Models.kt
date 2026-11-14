@@ -19,7 +19,9 @@ data class PhotoItem(
      * The HDR in this photo was added by this app's lossless mode, so the untouched original can
      * be taken back out of it and the photo done again.
      */
-    val redoable: Boolean = false
+    val redoable: Boolean = false,
+    /** When the gallery or the sharing app says the photo was taken. Used when the file has no date. */
+    val takenAt: Long? = null
 ) {
     val onDevice: Boolean get() = target != null
 
@@ -63,7 +65,10 @@ data class Trace(
     /** Which HDR checks said yes: queue, markers, decoder, layout. */
     val hdrChecks: List<String> = emptyList(),
     val sizeBefore: Long = -1,
-    val sizeAfter: Long = -1
+    val sizeAfter: Long = -1,
+    /** What the photo's metadata held when it arrived, and in the finished file: date, camera, gps. */
+    val metadataBefore: String = "",
+    val metadataAfter: String = ""
 )
 
 data class PhotoResult(

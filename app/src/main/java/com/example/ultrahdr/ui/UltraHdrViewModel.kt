@@ -12,8 +12,10 @@ import com.example.ultrahdr.processing.BatchConverter
 import com.example.ultrahdr.processing.ConvertOptions
 import com.example.ultrahdr.processing.CopyReport
 import com.example.ultrahdr.processing.HdrStrength
+import com.example.ultrahdr.processing.ImageExifHelper
 import com.example.ultrahdr.processing.MediaStoreSaver
 import com.example.ultrahdr.processing.PhotoItem
+import com.example.ultrahdr.processing.PhotoNames
 import com.example.ultrahdr.processing.PhotoResult
 import com.example.ultrahdr.processing.RecoveryStore
 import com.example.ultrahdr.processing.UltraHdrContainer
@@ -129,17 +131,23 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
 
     private fun check(uri: Uri): PhotoItem {
         val target = runCatching { MediaStoreSaver.resolveTarget(context, uri) }.getOrNull()
-        // The real file's name when there is one: the photo picker hands out names like 10866.jpg.
-        val name = target?.file?.name
-            ?: target?.mediaUri?.let { runCatching { MediaStoreSaver.displayName(context, it) }.getOrNull() }
-            ?: runCatching { MediaStoreSaver.displayName(context, uri) }.getOrNull()
-            ?: uri.lastPathSegment?.substringAfterLast('/')
-            ?: "Photo"
         // The whole file, not only its start: the labels can sit after a large EXIF block.
         val bytes = runCatching { MediaStoreSaver.readOriginal(context, uri, null)?.bytes }.getOrNull()
+        val takenAt = runCatching { MediaStoreSaver.dateTaken(context, uri) }.getOrNull()
+        // The real file's name when there is one. Otherwise the name the picker or the sharing app
+        // gave, unless it was made for a cache (a bare number, Google Photos' long ids).
+        val name = target?.file?.name ?: PhotoNames.readable(
+            target?.mediaUri?.let { runCatching { MediaStoreSaver.displayName(context, it) }.getOrNull() }
+                ?: runCatching { MediaStoreSaver.displayName(context, uri) }.getOrNull()
+                ?: uri.lastPathSegment?.substringAfterLast('/'),
+            bytes?.let { ImageExifHelper.getCaptureTimestamp(it) } ?: takenAt
+        )
         val alreadyHdr = bytes != null && runCatching { UltraHdrEngine.hdrChecks(bytes).isNotEmpty() }.getOrDefault(false)
         val redoable = alreadyHdr && runCatching { UltraHdrContainer.strip(bytes!!) != null }.getOrDefault(false)
-        return PhotoItem(uri = uri, name = name, checked = true, target = target, alreadyHdr = alreadyHdr, redoable = redoable)
+        return PhotoItem(
+            uri = uri, name = name, checked = true, target = target,
+            alreadyHdr = alreadyHdr, redoable = redoable, takenAt = takenAt
+        )
     }
 
     /** Leaves a batch that was not started, or the result screen. */

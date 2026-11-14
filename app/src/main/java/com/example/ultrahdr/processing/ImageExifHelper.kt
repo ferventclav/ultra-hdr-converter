@@ -167,6 +167,42 @@ object ImageExifHelper {
         null
     }
 
+    /** Which kinds of metadata a photo carries, for the Copy report: "date+camera+gps", or "none". */
+    fun metadataKinds(bytes: ByteArray): String = try {
+        metadataKinds(ExifInterface(ByteArrayInputStream(bytes)))
+    } catch (e: Exception) {
+        "unreadable"
+    }
+
+    fun metadataKinds(file: File): String = try {
+        metadataKinds(ExifInterface(file.absolutePath))
+    } catch (e: Exception) {
+        "unreadable"
+    }
+
+    private fun metadataKinds(exif: ExifInterface): String = listOfNotNull(
+        "date".takeIf { captureTimestamp(exif) != null },
+        "camera".takeIf { exif.getAttribute(ExifInterface.TAG_MAKE) != null || exif.getAttribute(ExifInterface.TAG_MODEL) != null },
+        "gps".takeIf { exif.latLong != null }
+    ).joinToString("+").ifEmpty { "none" }
+
+    /**
+     * Writes [time] as the capture date of a finished HDR [file], for a photo that arrived without
+     * a date of its own, then repairs the MPF index the new EXIF moved.
+     */
+    fun stampCaptureTime(file: File, time: Long) {
+        val text = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).format(java.util.Date(time))
+        applyMetadata(
+            file,
+            mapOf(
+                ExifInterface.TAG_DATETIME_ORIGINAL to text,
+                ExifInterface.TAG_DATETIME_DIGITIZED to text,
+                ExifInterface.TAG_DATETIME to text
+            )
+        )
+        JpegMpfFixer.fixMpfAndContainer(file)
+    }
+
     private fun captureTimestamp(exif: ExifInterface): Long? {
         return try {
             val dateStr = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)

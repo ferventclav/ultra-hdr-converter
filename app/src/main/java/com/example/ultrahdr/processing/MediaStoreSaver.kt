@@ -64,6 +64,24 @@ object MediaStoreSaver {
         }
     }
 
+    /**
+     * When the gallery, the photo picker or the sharing app says the photo was taken, in epoch
+     * milliseconds. Null when the provider doesn't say.
+     */
+    fun dateTaken(context: Context, uri: Uri): Long? {
+        if (uri.scheme == "file") return null
+        return try {
+            context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATE_TAKEN), null, null, null)
+                ?.use { cursor ->
+                    val index = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_TAKEN)
+                    if (index != -1 && cursor.moveToFirst() && !cursor.isNull(index)) cursor.getLong(index) else null
+                }
+                ?.takeIf { it > 0 }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     /** The real file behind a picked photo, or null when it is not a local file that can be edited. */
     fun resolveTarget(context: Context, uri: Uri): PhotoTarget? {
         if (uri.scheme == "file") return uri.path?.let { PhotoTarget(File(it), null) }
