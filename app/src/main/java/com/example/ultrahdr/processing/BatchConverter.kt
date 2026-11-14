@@ -118,12 +118,13 @@ class BatchConverter(
             // 4. Version 1.9's conversion: upright picture, gain map, JPEG 96, EXIF and MPF.
             staged.writeBytes(bytes)
             val encoded = UltraHdrEngine.writeReencoded(staged, options.strength, out)
-            // A copy of a photo that arrived without a date (some cloud photos do) gets the date the
-            // provider gave, so it sits in the right place in Gallery. Originals are never stamped.
+            // A copy carries its capture date with a time zone, so it sits in the same place in
+            // Gallery whether it came from the picker, a share or a download. Originals are never
+            // stamped.
             val ownDate = ImageExifHelper.getCaptureTimestamp(bytes)
             val takenAt = ownDate ?: item.takenAt
-            if (encoded != null && plan == SavePlan.Copy && ownDate == null && takenAt != null) {
-                ImageExifHelper.stampCaptureTime(out, takenAt)
+            if (encoded != null && plan == SavePlan.Copy) {
+                ImageExifHelper.stampCopyDate(out, bytes, item.takenAt)
             }
             if (encoded == null || !verify(out)) {
                 return@withContext result(Outcome.FAILED, "The HDR photo couldn't be made. Nothing was changed.")

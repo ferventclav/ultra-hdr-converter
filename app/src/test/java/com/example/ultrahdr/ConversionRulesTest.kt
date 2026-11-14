@@ -183,11 +183,81 @@ class ConversionRulesTest {
         assertTrue(checksBefore.isNotEmpty())
 
         val takenAt = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse("2026:11:14 23:15:00")!!.time
-        ImageExifHelper.stampCaptureTime(file, takenAt)
+        ImageExifHelper.stampCopyDate(file, file.readBytes(), takenAt)
 
         assertEquals(takenAt, ImageExifHelper.getCaptureTimestamp(file))
         assertEquals("date", ImageExifHelper.metadataKinds(file))
+        assertNotNull("time zone written", ExifInterface(file.absolutePath).getAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL))
         assertEquals("the gain map is still found the same ways", checksBefore, UltraHdrEngine.hdrChecks(file.readBytes()))
+    }
+
+    /** A Lightroom export (via WhatsApp) has only its edit date, DateTime, and no capture date. */
+    @Test
+    fun aPhotoWithOnlyAnEditDateGetsTheSameDateByEveryRoute() {
+        val staged = tmp.newFile("lr.jpg").apply { writeBytes(sceneJpeg(TestScenes.BEACH, 800, 600)) }
+        ExifInterface(staged.absolutePath).apply {
+            setAttribute(ExifInterface.TAG_DATETIME, "2025:07:07 00:11:16")
+            setAttribute(ExifInterface.TAG_OFFSET_TIME, "+05:30")
+            saveAttributes()
+        }
+        val source = staged.readBytes()
+        val pickerProviderDate = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse("2025:07:06 16:11:16")!!.time
+        for (providerTime in listOf(pickerProviderDate, null)) {
+            val out = tmp.newFile().apply { delete() }
+            assertNotNull(UltraHdrEngine.writeReencoded(staged, HdrStrength.BALANCED, out))
+            ImageExifHelper.stampCopyDate(out, source, providerTime)
+            val exif = ExifInterface(out.absolutePath)
+            assertEquals("route $providerTime", "2025:07:07 00:11:16", exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL))
+            assertEquals("route $providerTime", "+05:30", exif.getAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL))
+        }
+    }
+
+    /** A camera photo with a full capture date is left exactly as the copy already has it. */
+    @Test
+    fun aCompleteCaptureDateIsNotTouched() {
+        val staged = tmp.newFile("cam.jpg").apply { writeBytes(sceneJpeg(TestScenes.BEACH, 800, 600)) }
+        ExifInterface(staged.absolutePath).apply {
+            setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, "2024:01:14 16:16:55")
+            setAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL, "+05:30")
+            saveAttributes()
+        }
+        val out = tmp.newFile().apply { delete() }
+        assertNotNull(UltraHdrEngine.writeReencoded(staged, HdrStrength.BALANCED, out))
+        val before = out.readBytes()
+        ImageExifHelper.stampCopyDate(out, staged.readBytes(), 1L)
+        assertArrayEquals(before, out.readBytes())
+    }
+
+    /** Android's EXIF writer rounds these to 1/10000, so 1/1593 s came out as 1/1667 s. */
+    @Test
+    fun exposureTimeAndApertureAreCopiedExactly() {
+        val exifSegment = segment(0xE1, "Exif\u0000\u0000".toByteArray(Charsets.ISO_8859_1) + tiffWithExposure(1593, 18, 10))
+        val staged = tmp.newFile("fast.jpg").apply { writeBytes(afterSoi(sceneJpeg(TestScenes.BEACH, 800, 600), exifSegment)) }
+        assertEquals(1.0 / 1593, ExifInterface(staged.absolutePath).getAttributeDouble(ExifInterface.TAG_EXPOSURE_TIME, 0.0), 1e-12)
+
+        val out = tmp.newFile().apply { delete() }
+        assertNotNull(UltraHdrEngine.writeReencoded(staged, HdrStrength.BALANCED, out))
+        // The date stamp saves the EXIF once more; the exact values must survive that too.
+        ImageExifHelper.stampCopyDate(out, staged.readBytes(), 1_700_000_000_000L)
+
+        val exif = ExifInterface(out.absolutePath)
+        assertEquals(1.0 / 1593, exif.getAttributeDouble(ExifInterface.TAG_EXPOSURE_TIME, 0.0), 1e-12)
+        assertEquals(1.8, exif.getAttributeDouble(ExifInterface.TAG_F_NUMBER, 0.0), 1e-12)
+        // Robolectric's encoder writes no gain map, so HDR after the stamp is checked on a real HDR
+        // file in aPhotoWithNoDateGetsTheProviderDateAndStaysHdr.
+    }
+
+    /** Big-endian TIFF: IFD0 points to an EXIF IFD holding ExposureTime 1/[den] and FNumber [fNum]/[fDen]. */
+    private fun tiffWithExposure(den: Int, fNum: Int, fDen: Int): ByteArray {
+        val b = java.nio.ByteBuffer.allocate(8 + 18 + 30 + 16)
+        b.put("MM".toByteArray()).putShort(42).putInt(8)
+        b.putShort(1).putShort(0x8769.toShort()).putShort(4).putInt(1).putInt(26).putInt(0)
+        b.putShort(2)
+        b.putShort(0x829A.toShort()).putShort(5).putInt(1).putInt(56)
+        b.putShort(0x829D.toShort()).putShort(5).putInt(1).putInt(64)
+        b.putInt(0)
+        b.putInt(1).putInt(den).putInt(fNum).putInt(fDen)
+        return b.array()
     }
 
     // ---------------------------------------------------------------------------------------

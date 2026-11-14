@@ -187,20 +187,59 @@ object ImageExifHelper {
     ).joinToString("+").ifEmpty { "none" }
 
     /**
-     * Writes [time] as the capture date of a finished HDR [file], for a photo that arrived without
-     * a date of its own, then repairs the MPF index the new EXIF moved.
+     * Gives a finished HDR copy a capture date that every gallery reads the same way, whichever
+     * route the photo came by. The date is the photo's own capture date, else its last edit date
+     * (all that a Lightroom or WhatsApp file carries), else [providerTime] from the picker or the
+     * sharing app. It is written with its time zone, because Android's media scanner throws away a
+     * capture date without one once the file is more than a day newer than the date, and the copy
+     * then sorts as taken today. Repairs the MPF index the new EXIF moved. Does nothing when the
+     * copy already has both, or when no date is known.
      */
-    fun stampCaptureTime(file: File, time: Long) {
-        val text = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).format(java.util.Date(time))
-        applyMetadata(
-            file,
-            mapOf(
-                ExifInterface.TAG_DATETIME_ORIGINAL to text,
-                ExifInterface.TAG_DATETIME_DIGITIZED to text,
-                ExifInterface.TAG_DATETIME to text
-            )
+    fun stampCopyDate(file: File, source: ByteArray, providerTime: Long?) {
+        val exif = try {
+            ExifInterface(ByteArrayInputStream(source))
+        } catch (_: Exception) {
+            null
+        }
+        fun valid(tag: String) = exif?.getAttribute(tag)?.takeIf { parseLocal(it) != null }
+        val original = valid(ExifInterface.TAG_DATETIME_ORIGINAL)
+        val originalOffset = exif?.getAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL)
+        if (original != null && originalOffset != null) return
+        val edited = valid(ExifInterface.TAG_DATETIME)
+        val (text, offset) = when {
+            original != null -> original to (originalOffset ?: offsetAt(original))
+            edited != null -> edited to (exif?.getAttribute(ExifInterface.TAG_OFFSET_TIME) ?: offsetAt(edited))
+            providerTime != null && providerTime > 0 ->
+                newFormat().format(java.util.Date(providerTime)).let { it to offsetAt(it) }
+            else -> return
+        }
+        val values = mutableMapOf(
+            ExifInterface.TAG_DATETIME_ORIGINAL to text,
+            ExifInterface.TAG_OFFSET_TIME_ORIGINAL to offset
         )
+        if (valid(ExifInterface.TAG_DATETIME_DIGITIZED) == null) {
+            values[ExifInterface.TAG_DATETIME_DIGITIZED] = text
+            values[ExifInterface.TAG_OFFSET_TIME_DIGITIZED] = offset
+        }
+        applyMetadata(file, values)
         JpegMpfFixer.fixMpfAndContainer(file)
+    }
+
+    private fun newFormat() = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US)
+
+    private fun parseLocal(text: String): Long? = try {
+        newFormat().apply { isLenient = false }.parse(text.trim())?.time
+    } catch (_: Exception) {
+        null
+    }
+
+    /** The phone's time zone offset at the moment [local] names, as EXIF writes it: "+05:30". */
+    private fun offsetAt(local: String): String {
+        val time = parseLocal(local) ?: System.currentTimeMillis()
+        val minutes = java.util.TimeZone.getDefault().getOffset(time) / 60_000
+        val sign = if (minutes < 0) "-" else "+"
+        val abs = kotlin.math.abs(minutes)
+        return "%s%02d:%02d".format(Locale.US, sign, abs / 60, abs % 60)
     }
 
     private fun captureTimestamp(exif: ExifInterface): Long? {

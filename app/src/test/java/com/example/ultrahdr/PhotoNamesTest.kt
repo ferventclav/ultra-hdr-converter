@@ -24,6 +24,12 @@ class PhotoNamesTest {
     }
 
     @Test
+    fun aGooglePhotosShareNameBecomesTheCaptureTime() {
+        listOf("image.jpg", "Image.JPG", "image (1).jpg", "photo.jpeg", "picture_2.jpg", "download.jpg")
+            .forEach { assertEquals(it, "20261114_231500.jpg", PhotoNames.readable(it, taken)) }
+    }
+
+    @Test
     fun withNoNameAndNoDateTheTimeNowIsUsed() {
         assertEquals("20261114_231500.jpg", PhotoNames.readable(null, null, now = taken))
     }
@@ -35,6 +41,8 @@ class PhotoNamesTest {
             "IMG_1234.JPG",
             "PXL_20251114_123456789.jpg",
             "IMG-20251114-WA0003.jpg",
+            "IMG_20251114.jpg",
+            "Photo booth.jpg",
             "Holiday at the beach.jpg"
         ).forEach { assertEquals(it, PhotoNames.readable(it, taken)) }
     }

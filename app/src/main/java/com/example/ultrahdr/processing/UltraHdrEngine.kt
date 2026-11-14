@@ -164,6 +164,7 @@ internal object UltraHdrEngine {
             }
             if (!encoded) return null
             ImageExifHelper.copyExifMetadata(staged, out)
+            ExifRationals.copyExact(staged.inputStream().use { it.readNBytes(1 shl 20) }, out)
             val sourcePixels = bounds.outWidth.toLong() * bounds.outHeight
             val savedPixels = upright.width.toLong() * upright.height
             return Reencoded(plan, downsized = sourcePixels > 0 && savedPixels < sourcePixels)
