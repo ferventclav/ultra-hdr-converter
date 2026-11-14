@@ -101,7 +101,8 @@ object ImageExifHelper {
     fun isAlreadyUltraHdr(sourceFile: File): Boolean {
         // 1. Precise byte inspection for specific Ultra HDR Gainmap namespaces
         try {
-            val buffer = ByteArray(minOf(sourceFile.length(), HEADER_SCAN_BYTES.toLong()).toInt())
+            // The whole file: some cameras put the labels after a large EXIF block.
+            val buffer = ByteArray(minOf(sourceFile.length(), 200L * 1024 * 1024).toInt())
             var filled = 0
             FileInputStream(sourceFile).use { input ->
                 while (filled < buffer.size) {

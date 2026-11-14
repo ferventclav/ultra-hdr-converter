@@ -45,7 +45,8 @@ class GainMapPlan(
  * percentile, and it rises steeply so only the top of the range moves. Colour, however saturated,
  * never counts as a highlight. Nothing is blurred.
  *
- * The one addition is [mostlyWhiteGuard], which only acts on pictures that are nearly all white.
+ * The one addition is [mostlyWhiteGuard], which only acts on pictures that are nearly all white,
+ * and only for SUBTLE and VIVID. BALANCED is never changed by it.
  */
 object GainMapSynth {
 
@@ -123,7 +124,12 @@ object GainMapSynth {
 
         var strongCount = 0
         for (level in 128..255) strongCount += gainHistogram[level]
-        val ratioMax = mostlyWhiteGuard(headroom.pow(strength.headroomPower), strongCount.toFloat() / count)
+        // BALANCED stays exactly version 1.9, documents and screenshots included.
+        val ratioMax = if (strength == HdrStrength.BALANCED) {
+            headroom
+        } else {
+            mostlyWhiteGuard(headroom.pow(strength.headroomPower), strongCount.toFloat() / count)
+        }
 
         // 5. The numbers shown to the person.
         val topLevel = percentile(gainHistogram, count, 0.999f)
@@ -156,12 +162,13 @@ object GainMapSynth {
         return 1f + (ratio - 1f) * (1f - 0.75f * eased)
     }
 
-    /** Largest size with the same shape whose long side is at most [maxDimension]. */
+    /**
+     * Largest size with the same shape whose long side is at most [maxDimension]. Rounds down,
+     * exactly as version 1.9 did, so the gain map has the same size as it had there.
+     */
     fun fit(width: Int, height: Int, maxDimension: Int = MAX_DIMENSION): Pair<Int, Int> {
-        val longSide = maxOf(width, height)
-        if (longSide <= maxDimension) return width to height
-        val scale = maxDimension.toFloat() / longSide
-        return maxOf(1, (width * scale + 0.5f).toInt()) to maxOf(1, (height * scale + 0.5f).toInt())
+        val scale = minOf(1f, maxDimension.toFloat() / maxOf(width, height).toFloat())
+        return maxOf(1, (width * scale).toInt()) to maxOf(1, (height * scale).toInt())
     }
 
     /** Value (0..255) below which [fraction] of the samples fall. */

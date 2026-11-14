@@ -199,6 +199,28 @@ internal object UltraHdrEngine {
         }
     }
 
+    /** The phone's decoder alone: does it find a gain map in [bytes]? */
+    fun decoderSeesGainMap(bytes: ByteArray): Boolean = try {
+        val options = BitmapFactory.Options().apply { inSampleSize = 8 }
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        val result = bitmap?.hasGainmap() == true
+        bitmap?.recycle()
+        result
+    } catch (_: Throwable) {
+        false
+    }
+
+    /**
+     * Every already-HDR check, each named, for skipping and for the Copy report: "markers" (the
+     * labels anywhere in the file), "decoder" (the phone's decoder) and "layout" (the file holds a
+     * second picture described as a gain map). Empty when none of them fires.
+     */
+    fun hdrChecks(bytes: ByteArray): List<String> = buildList {
+        if (ImageExifHelper.looksLikeUltraHdr(bytes)) add("markers")
+        if (decoderSeesGainMap(bytes)) add("decoder")
+        if (UltraHdrContainer.inspect(bytes) is UltraHdrContainer.Inspection.AlreadyHdr) add("layout")
+    }
+
     /** Is this photo HDR already, by its labels or by the phone's own decoder? Used for skipping. */
     fun hasGainMapBytes(bytes: ByteArray): Boolean = try {
         val options = BitmapFactory.Options().apply { inSampleSize = 8 }

@@ -40,12 +40,30 @@ enum class Outcome {
     FAILED
 }
 
+/** The note a plain already-HDR photo gets. The result card does not repeat it. */
+const val PLAIN_HDR_NOTE = "Already HDR, left as it is."
+
 /** The choices that apply to a whole batch. */
 data class ConvertOptions(
     val replaceOriginal: Boolean,
     val strength: HdrStrength,
-    /** Attach the gain map to the untouched file instead of saving the picture again. */
-    val lossless: Boolean = false
+    /** Attach the gain map to the untouched file instead of saving the picture again. Parked: no switch. */
+    val lossless: Boolean = false,
+    /** Take the gain map back out of photos an earlier version added it to, and convert them again. */
+    val redo: Boolean = false
+)
+
+/** What the app saw while handling one photo. Only used for the Copy report. */
+data class Trace(
+    /** picker, media, file, or the provider of the app that shared the photo. */
+    val source: String = "",
+    val realFileFound: Boolean = false,
+    /** "real file" or "picked copy". */
+    val bytesFrom: String = "",
+    /** Which HDR checks said yes: queue, markers, decoder, layout. */
+    val hdrChecks: List<String> = emptyList(),
+    val sizeBefore: Long = -1,
+    val sizeAfter: Long = -1
 )
 
 data class PhotoResult(
@@ -58,7 +76,8 @@ data class PhotoResult(
     val keptOriginalPixels: Boolean = false,
     /** Plain-language reason: why it was copied, skipped or failed. */
     val note: String? = null,
-    val peakBoost: Float = 1f
+    val peakBoost: Float = 1f,
+    val trace: Trace = Trace()
 ) {
     val converted: Boolean get() = outcome == Outcome.UPDATED || outcome == Outcome.COPIED
 }

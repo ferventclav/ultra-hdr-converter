@@ -2,6 +2,7 @@ package com.example.ultrahdr.ui
 
 import com.example.ultrahdr.processing.MediaStoreSaver
 import com.example.ultrahdr.processing.Outcome
+import com.example.ultrahdr.processing.PLAIN_HDR_NOTE
 import com.example.ultrahdr.processing.PhotoResult
 
 enum class Tone { SUCCESS, INFO, ERROR }
@@ -20,7 +21,8 @@ data class Summary(
     val reassurance: String?
 )
 
-fun summarize(results: Collection<PhotoResult>, total: Int, stopped: Boolean): Summary {
+fun summarize(results: Collection<PhotoResult>, total: Int, stopped: Boolean, redo: Boolean = false): Summary {
+    val leftAlone = results.count { it.outcome == Outcome.LEFT_ALONE }
     val updated = results.count { it.outcome == Outcome.UPDATED }
     val copied = results.count { it.outcome == Outcome.COPIED }
     val alreadyHdr = results.count { it.outcome == Outcome.ALREADY_HDR }
@@ -53,15 +55,25 @@ fun summarize(results: Collection<PhotoResult>, total: Int, stopped: Boolean): S
         if (noHighlights > 0) {
             add(SummaryLine(LineKind.SKIPPED, "$noHighlights skipped, no bright highlights"))
         }
+        if (leftAlone > 0) add(SummaryLine(LineKind.SKIPPED, "$leftAlone left as ${if (leftAlone == 1) "it was" else "they were"}"))
         // A single failed photo is already the title; a count under it would only repeat it.
         if (failed > 0 && results.size > 1) add(SummaryLine(LineKind.FAILED, "$failed failed"))
         if (stopped && notStarted > 0) add(SummaryLine(LineKind.NOT_STARTED, "$notStarted not started"))
     }
 
     val notes = results
-        .filter { it.note != null && (it.outcome == Outcome.COPIED || it.outcome == Outcome.FAILED) }
+        .filter { it.note != null && it.note != PLAIN_HDR_NOTE && it.outcome != Outcome.NO_HIGHLIGHTS }
         .groupBy { it.note!! }
         .map { (note, group) -> "${names(group.map { it.name })}: $note" }
+        .let { list ->
+            val plainHdr = results.filter { it.outcome == Outcome.ALREADY_HDR && it.note == PLAIN_HDR_NOTE }
+            if (redo && plainHdr.isNotEmpty()) {
+                list + ("${names(plainHdr.map { it.name })}: HDR from the camera, or saved again by an " +
+                    "earlier version. The app can't undo that, so ${if (plainHdr.size == 1) "it stays" else "they stay"} as is.")
+            } else {
+                list
+            }
+        }
 
     val convertedResults = results.filter { it.converted }
     val reassurance = if (convertedResults.isNotEmpty() && convertedResults.all { it.keptOriginalPixels }) {

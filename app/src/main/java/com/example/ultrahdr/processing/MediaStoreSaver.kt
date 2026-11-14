@@ -29,7 +29,18 @@ object MediaStoreSaver {
 
     const val COPY_FOLDER = "UltraHDR"
 
-    private enum class WriteState { DONE, UNTOUCHED, BROKEN }
+    private enum class WriteState { DONE_FILE, DONE_MEDIA, UNTOUCHED, BROKEN }
+
+    /** How an in-place update ended. */
+    enum class InPlace {
+        DONE,
+        /** Android did not let the app open the original for writing. Nothing was changed. */
+        NOT_ALLOWED,
+        /** No room for the safety backup, so the original was not touched. */
+        NO_BACKUP,
+        /** Writing failed part way. The original was put back, or waits in the backup for the next launch. */
+        FAILED
+    }
 
     // ---------------------------------------------------------------------------------------
     // Finding and reading the photo
@@ -56,10 +67,42 @@ object MediaStoreSaver {
     /** The real file behind a picked photo, or null when it is not a local file that can be edited. */
     fun resolveTarget(context: Context, uri: Uri): PhotoTarget? {
         if (uri.scheme == "file") return uri.path?.let { PhotoTarget(File(it), null) }
+        embeddedMediaUri(context, uri)?.let { media ->
+            return PhotoTarget(getRealPathFromUri(context, media), media)
+        }
         if (isCloudOrRemoteUri(context, uri)) return null
         val file = getRealPathFromUri(context, uri)
         val media = resolveMediaStoreUri(context, uri)
         return if (file == null && media == null) null else PhotoTarget(file, media)
+    }
+
+    /**
+     * Google Photos shares a photo that is on the phone under its own address, with the gallery
+     * address written inside it (content%3A%2F%2Fmedia%2F...%2F10866). Returns that gallery address
+     * when the gallery still has the photo, so it is treated as local and not as a cloud photo.
+     */
+    internal fun embeddedMediaUri(context: Context, uri: Uri): Uri? {
+        if (uri.authority?.startsWith("com.google.android.apps.photos") != true) return null
+        val id = embeddedMediaId(uri.toString()) ?: return null
+        val media = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+        return try {
+            context.contentResolver.query(media, arrayOf(MediaStore.Images.Media._ID), null, null, null)
+                ?.use { if (it.moveToFirst()) media else null }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    internal fun embeddedMediaId(uri: String): Long? =
+        Regex("""content://media/[a-z0-9_]+/images/media/(\d+)""")
+            .find(Uri.decode(uri))?.groupValues?.get(1)?.toLongOrNull()
+
+    /** Where a picked photo's address came from, for the Copy report. */
+    fun sourceOf(uri: Uri): String = when {
+        uri.scheme == "file" -> "file"
+        uri.authority == MediaStore.AUTHORITY && uri.path.orEmpty().contains("/picker") -> "picker"
+        uri.authority == MediaStore.AUTHORITY -> "media"
+        else -> uri.authority ?: uri.scheme ?: "unknown"
     }
 
     /**
@@ -166,7 +209,7 @@ object MediaStoreSaver {
     /**
      * Replaces the photo's contents with [content], keeping the same file, name and gallery entry.
      * The original bytes are parked in [RecoveryStore] until the new file is fully on disk, and are
-     * written back straight away if anything goes wrong.
+     * written back straight away if anything goes wrong. Never makes a copy.
      */
     suspend fun replaceInPlace(
         context: Context,
@@ -174,51 +217,67 @@ object MediaStoreSaver {
         content: File,
         original: ByteArray,
         name: String
-    ): Boolean = withContext(Dispatchers.IO + NonCancellable) {
-        val modified = target.file?.lastModified()?.takeIf { it > 0 }
+    ): InPlace = withContext(Dispatchers.IO + NonCancellable) {
         val ticket = try {
             RecoveryStore.begin(context, original, name, target, content.length())
         } catch (_: Throwable) {
-            return@withContext false
+            return@withContext InPlace.NO_BACKUP
         }
         val state = writeInPlace(context, target) { out ->
             FileInputStream(content).use { it.copyTo(out, 1 shl 16) }
         }
         when (state) {
-            WriteState.DONE -> {
+            WriteState.DONE_FILE, WriteState.DONE_MEDIA -> {
                 RecoveryStore.commit(ticket)
-                val file = target.file
-                val filePath = file?.absolutePath ?: target.mediaUri?.let { getAbsolutePathFromUri(context, it) }
-                if (file != null && file.exists() && modified != null) {
-                    file.setLastModified(modified)
-                }
-                if (filePath != null) {
-                    MediaScannerConnection.scanFile(context, arrayOf(filePath), arrayOf("image/jpeg"), null)
-                } else if (target.mediaUri != null) {
-                    context.contentResolver.notifyChange(target.mediaUri, null)
-                }
-                true
+                afterWrite(context, target, state)
+                InPlace.DONE
             }
             WriteState.UNTOUCHED -> {
                 RecoveryStore.commit(ticket)
-                false
+                InPlace.NOT_ALLOWED
             }
             WriteState.BROKEN -> {
                 // Put the original back. If even that fails, the backup waits for the next launch.
-                if (writeInPlace(context, target) { it.write(original) } == WriteState.DONE) {
+                val back = writeInPlace(context, target) { it.write(original) }
+                if (back == WriteState.DONE_FILE || back == WriteState.DONE_MEDIA) {
                     RecoveryStore.commit(ticket)
+                    afterWrite(context, target, back)
                 }
-                false
+                InPlace.FAILED
             }
         }
     }
 
-    internal fun writeBytesInPlace(context: Context, target: PhotoTarget, bytes: ByteArray): Boolean =
-        writeInPlace(context, target) { it.write(bytes) } == WriteState.DONE
+    /** Tells the gallery about the new contents, the way version 1.9 did for each kind of write. */
+    private fun afterWrite(context: Context, target: PhotoTarget, state: WriteState) {
+        if (state == WriteState.DONE_FILE) {
+            val path = target.file?.absolutePath ?: return
+            MediaScannerConnection.scanFile(context, arrayOf(path), arrayOf("image/jpeg"), null)
+        } else {
+            val media = target.mediaUri ?: return
+            try {
+                if (isMediaStoreImage(media)) {
+                    val values = ContentValues().apply { put(MediaStore.Images.Media.ORIENTATION, 0) }
+                    context.contentResolver.update(media, values, null, null)
+                }
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    internal fun writeBytesInPlace(context: Context, target: PhotoTarget, bytes: ByteArray): Boolean {
+        val state = writeInPlace(context, target) { it.write(bytes) }
+        if (state == WriteState.DONE_FILE || state == WriteState.DONE_MEDIA) {
+            afterWrite(context, target, state)
+            return true
+        }
+        return false
+    }
 
     /**
-     * Writes into the existing file or MediaStore entry in place using rwt truncation
-     * without unlinking the file or triggering duplicate MediaStore rows.
+     * Version 1.9's two in-place writes, the ones proven on the S25: the real file through a plain
+     * FileOutputStream when the app may write to it, otherwise the gallery entry through
+     * openOutputStream(uri, "wt"). Both keep the same file and the same gallery row.
      */
     private fun writeInPlace(
         context: Context,
@@ -233,36 +292,29 @@ object MediaStoreSaver {
                 null
             }
             if (out != null) {
-                try {
+                return try {
                     out.use {
                         write(it)
                         it.fd.sync()
                     }
-                    return WriteState.DONE
+                    WriteState.DONE_FILE
                 } catch (_: Throwable) {
-                    return WriteState.BROKEN
+                    WriteState.BROKEN
                 }
             }
         }
-        val media = target.mediaUri
-        if (media != null) {
-            try {
-                context.contentResolver.openFileDescriptor(media, "rwt")?.use { pfd ->
-                    try {
-                        android.system.Os.ftruncate(pfd.fileDescriptor, 0L)
-                    } catch (_: Throwable) {}
-                    FileOutputStream(pfd.fileDescriptor).use { fos ->
-                        write(fos)
-                        fos.flush()
-                    }
-                    pfd.fileDescriptor.sync()
-                    return WriteState.DONE
-                }
-            } catch (_: Throwable) {
-                return WriteState.BROKEN
-            }
+        val media = target.mediaUri ?: return WriteState.UNTOUCHED
+        val out = try {
+            context.contentResolver.openOutputStream(media, "wt")
+        } catch (_: Throwable) {
+            null
+        } ?: return WriteState.UNTOUCHED
+        return try {
+            out.use { write(it) }
+            WriteState.DONE_MEDIA
+        } catch (_: Throwable) {
+            WriteState.BROKEN
         }
-        return WriteState.UNTOUCHED
     }
 
     private fun getAbsolutePathFromUri(context: Context, uri: Uri): String? {

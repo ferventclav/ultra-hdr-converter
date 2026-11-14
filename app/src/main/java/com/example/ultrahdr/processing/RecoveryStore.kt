@@ -19,8 +19,9 @@ internal object RecoveryStore {
 
     class Ticket internal constructor(internal val data: File, internal val meta: File)
 
-    class Report(val restored: Int, val exported: Int) {
-        val any: Boolean get() = restored + exported > 0
+    /** [waiting]: originals that could not be put back yet. They are tried again next launch. */
+    class Report(val restored: Int, val waiting: Int) {
+        val any: Boolean get() = restored + waiting > 0
     }
 
     fun begin(
@@ -60,7 +61,7 @@ internal object RecoveryStore {
         val dir = File(context.filesDir, DIR)
         val metas = dir.listFiles { f -> f.name.endsWith(".txt") }.orEmpty()
         var restored = 0
-        var exported = 0
+        var waiting = 0
 
         for (meta in metas) {
             val data = File(dir, meta.name.removeSuffix(".txt") + ".bin")
@@ -95,14 +96,9 @@ internal object RecoveryStore {
                 meta.delete()
                 data.delete()
             } else {
-                // No longer allowed to touch the original, so hand the photo back as a new file.
-                val base = name.substringBeforeLast('.', name)
-                val saved = MediaStoreSaver.saveCopy(context, data, "$base (original).jpg", captureTime = null)
-                if (saved.isSuccess) {
-                    exported++
-                    meta.delete()
-                    data.delete()
-                }
+                // Only ever put back where it was. Never saved as a second photo: the backup stays
+                // here and is tried again on the next launch.
+                waiting++
             }
         }
 
@@ -111,6 +107,6 @@ internal object RecoveryStore {
             .filter { !File(dir, it.name.removeSuffix(".bin") + ".txt").exists() }
             .forEach { it.delete() }
 
-        return Report(restored, exported)
+        return Report(restored, waiting)
     }
 }

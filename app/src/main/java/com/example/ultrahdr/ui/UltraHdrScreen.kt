@@ -118,6 +118,8 @@ class ScreenActions(
     val clearPhotos: () -> Unit = {},
     val setStrength: (HdrStrength) -> Unit = {},
     val setReplaceOriginal: (Boolean) -> Unit = {},
+    val setRedo: (Boolean) -> Unit = {},
+    val copyReport: () -> Unit = {},
     val convert: () -> Unit = {},
     val stop: () -> Unit = {},
     val done: () -> Unit = {},
@@ -147,6 +149,12 @@ fun UltraHdrApp(viewModel: UltraHdrViewModel) {
             clearPhotos = viewModel::clearPhotos,
             setStrength = viewModel::setStrength,
             setReplaceOriginal = viewModel::setReplaceOriginal,
+            setRedo = viewModel::setRedo,
+            copyReport = {
+                context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
+                    android.content.ClipData.newPlainText("Ultra HDR report", viewModel.copyReport())
+                )
+            },
             convert = viewModel::convert,
             stop = viewModel::stop,
             done = viewModel::done,
@@ -287,7 +295,12 @@ fun UltraHdrScreen(
 
                 if (phase is Phase.Finished) {
                     wide("summary") {
-                        SummaryCard(summarize(state.results.values, state.photos.size, phase.stopped))
+                        Column {
+                            SummaryCard(summarize(state.results.values, state.photos.size, phase.stopped, state.redo))
+                            TextButton(onClick = actions.copyReport, modifier = Modifier.align(Alignment.End)) {
+                                Text("Copy report", color = OneUiBlue)
+                            }
+                        }
                     }
                     items(state.photos, key = { it.uri.toString() }) { item ->
                         val result = state.results[item.uri]
@@ -573,7 +586,7 @@ private fun OptionsCard(state: UiState, actions: ScreenActions, enabled: Boolean
                     Spacer(Modifier.height(3.dp))
                     Text(
                         text = if (state.replaceOriginal) {
-                            "Each photo stays where it is in Gallery. Its picture data is kept exactly and HDR brightness is added to the file."
+                            "Each photo is updated where it is in Gallery. Photos that are HDR already are never touched."
                         } else {
                             "Your photos are left alone. HDR copies are saved to the UltraHDR album."
                         },
@@ -585,6 +598,33 @@ private fun OptionsCard(state: UiState, actions: ScreenActions, enabled: Boolean
                 Switch(
                     checked = state.replaceOriginal,
                     onCheckedChange = actions.setReplaceOriginal,
+                    enabled = enabled,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = OneUiBlue,
+                        uncheckedThumbColor = Color.White,
+                        uncheckedTrackColor = Color(0xFF9A999E),
+                        uncheckedBorderColor = Color.Transparent
+                    )
+                )
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 16.dp), thickness = 1.dp, color = UhdrTheme.colors.hairline)
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).padding(end = 16.dp)) {
+                    Text("Redo photos this app converted before", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = "Takes out the HDR that version 2.0 added and converts the photo again. " +
+                            "Photos an earlier version saved again can't be undone and are skipped.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = UhdrTheme.colors.textSecondary
+                    )
+                }
+                Switch(
+                    checked = state.redo,
+                    onCheckedChange = actions.setRedo,
                     enabled = enabled,
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color.White,

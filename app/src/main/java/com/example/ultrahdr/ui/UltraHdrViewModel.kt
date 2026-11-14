@@ -11,7 +11,10 @@ import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ultrahdr.processing.BatchConverter
+import com.example.ultrahdr.processing.ConvertOptions
+import com.example.ultrahdr.processing.CopyReport
 import com.example.ultrahdr.processing.HdrStrength
+import com.example.ultrahdr.processing.UltraHdrContainer
 import com.example.ultrahdr.processing.ImageExifHelper
 import com.example.ultrahdr.processing.MediaStoreSaver
 import com.example.ultrahdr.processing.PhotoItem
@@ -61,6 +64,8 @@ data class UiState(
     val phase: Phase = Phase.Idle,
     val strength: HdrStrength = HdrStrength.BALANCED,
     val replaceOriginal: Boolean = true,
+    /** Convert again the photos an earlier version added its gain map to without re-saving them. */
+    val redo: Boolean = false,
     val notice: Notice? = null,
     val preview: PreviewUi? = null
 )
@@ -80,7 +85,8 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
             strength = runCatching {
                 HdrStrength.valueOf(prefs.getString(KEY_STRENGTH, null) ?: HdrStrength.BALANCED.name)
             }.getOrDefault(HdrStrength.BALANCED),
-            replaceOriginal = prefs.getBoolean(KEY_REPLACE, true)
+            replaceOriginal = prefs.getBoolean(KEY_REPLACE, true),
+            redo = prefs.getBoolean(KEY_REDO, false)
         )
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -99,7 +105,7 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
         if (!report.any) return@launch
         val parts = buildList {
             if (report.restored > 0) add("${photos(report.restored)} put back as ${if (report.restored == 1) "it was" else "they were"}")
-            if (report.exported > 0) add("${photos(report.exported)} saved to the ${MediaStoreSaver.COPY_FOLDER} album")
+            if (report.waiting > 0) add("${photos(report.waiting)} will be put back next time the app opens")
         }
         _state.update {
             it.copy(notice = Notice("The last conversion was cut off. " + parts.joinToString(", ") + ".", isError = false))
@@ -133,38 +139,19 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun check(uri: Uri): PhotoItem {
-        val name = runCatching { MediaStoreSaver.displayName(context, uri) }.getOrNull()
+        val target = runCatching { MediaStoreSaver.resolveTarget(context, uri) }.getOrNull()
+        // The real file's name when there is one: the photo picker hands out names like 10866.jpg.
+        val name = target?.file?.name
+            ?: target?.mediaUri?.let { runCatching { MediaStoreSaver.displayName(context, it) }.getOrNull() }
+            ?: runCatching { MediaStoreSaver.displayName(context, uri) }.getOrNull()
             ?: uri.lastPathSegment?.substringAfterLast('/')
             ?: "Photo"
-        val target = runCatching { MediaStoreSaver.resolveTarget(context, uri) }.getOrNull()
-        var alreadyHdr = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                val buffer = ByteArray(ImageExifHelper.HEADER_SCAN_BYTES)
-                var filled = 0
-                while (filled < buffer.size) {
-                    val read = input.read(buffer, filled, buffer.size - filled)
-                    if (read < 0) break
-                    filled += read
-                }
-                ImageExifHelper.looksLikeUltraHdr(buffer, filled)
-            } ?: false
-        }.getOrDefault(false)
-
-        if (!alreadyHdr && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            alreadyHdr = runCatching {
-                val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 }
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val bmp = android.graphics.BitmapFactory.decodeStream(stream, null, options)
-                    val hasGainmap = bmp?.hasGainmap() == true
-                    bmp?.recycle()
-                    hasGainmap
-                } ?: false
-            }.getOrDefault(false)
-        }
-
-        return PhotoItem(uri = uri, name = name, checked = true, target = target, alreadyHdr = alreadyHdr)
+        // The whole file, not only its start: the labels can sit after a large EXIF block.
+        val bytes = runCatching { MediaStoreSaver.readOriginal(context, uri, null)?.bytes }.getOrNull()
+        val alreadyHdr = bytes != null && runCatching { UltraHdrEngine.hdrChecks(bytes).isNotEmpty() }.getOrDefault(false)
+        val redoable = alreadyHdr && runCatching { UltraHdrContainer.strip(bytes!!) != null }.getOrDefault(false)
+        return PhotoItem(uri = uri, name = name, checked = true, target = target, alreadyHdr = alreadyHdr, redoable = redoable)
     }
-
     fun removePhoto(uri: Uri) {
         if (_state.value.phase !is Phase.Idle) return
         _state.update { s -> s.copy(photos = s.photos.filterNot { it.uri == uri }) }
@@ -191,6 +178,25 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
         prefs.edit().putBoolean(KEY_REPLACE, enabled).apply()
     }
 
+    fun setRedo(enabled: Boolean) {
+        _state.update { it.copy(redo = enabled) }
+        prefs.edit().putBoolean(KEY_REDO, enabled).apply()
+    }
+
+    /** Plain text for the clipboard: what happened to each photo and why. */
+    fun copyReport(): String {
+        val s = _state.value
+        val version = runCatching {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            "${info.versionName} (${info.longVersionCode})"
+        }.getOrDefault("?")
+        val header = "Ultra HDR Converter $version | ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} | " +
+            "Android ${android.os.Build.VERSION.RELEASE} | update originals ${if (s.replaceOriginal) "on" else "off"} | " +
+            "redo ${if (s.redo) "on" else "off"} | ${s.strength.name.lowercase()}"
+        val ordered = s.photos.mapNotNull { s.results[it.uri] }
+        return CopyReport.build(header, ordered)
+    }
+
     fun dismissNotice() {
         _state.update { it.copy(notice = null) }
     }
@@ -212,7 +218,7 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
             val current = _state.value
             if (current.replaceOriginal && !Environment.isExternalStorageManager()) {
                 val needConsent = current.photos
-                    .filter { !it.alreadyHdr }
+                    .filter { !it.alreadyHdr || (current.redo && it.redoable) }
                     .mapNotNull { it.target?.mediaUri }
                     .distinct()
                 if (needConsent.isNotEmpty()) {
@@ -255,8 +261,11 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
         try {
             converter.convertAll(
                 items = photos,
-                replaceOriginal = start.replaceOriginal,
-                strength = start.strength,
+                options = ConvertOptions(
+                    replaceOriginal = start.replaceOriginal,
+                    strength = start.strength,
+                    redo = start.redo
+                ),
                 onStart = { index, item ->
                     _state.update { it.copy(phase = Phase.Working(index, photos.size, item.uri, item.name)) }
                 },
@@ -375,6 +384,7 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
     private companion object {
         const val KEY_STRENGTH = "strength"
         const val KEY_REPLACE = "replace_original"
+        const val KEY_REDO = "redo_earlier"
         const val PREVIEW_MAX_SIDE = 2400
     }
 }

@@ -160,9 +160,14 @@ class GainMapSynthTest {
 
     @Test
     fun whitePageOnlyGetsAModestLift() {
-        val p = plan(flat(rgb(250, 250, 250)))
-        assertTrue("Documents and screenshots must not glare: ${p.ratioMax}", p.ratioMax < 2.2f)
-        assertTrue("…and a page of white ends up under 2x: ${p.peakBoost}", p.peakBoost < 1.8f)
+        // BALANCED is version 1.9 exactly, documents included: the full 5.2x it gave a white page.
+        assertEquals(5.2f, plan(flat(rgb(250, 250, 250))).ratioMax, 0f)
+        // SUBTLE and VIVID keep the guard, so a white page does not glare there.
+        for (strength in listOf(HdrStrength.SUBTLE, HdrStrength.VIVID)) {
+            val p = plan(flat(rgb(250, 250, 250)), strength)
+            assertTrue("$strength: documents and screenshots must not glare: ${p.ratioMax}", p.ratioMax < 2.5f)
+            assertTrue("$strength: a page of white stays modest: ${p.peakBoost}", p.peakBoost < 2.2f)
+        }
     }
 
     @Test
