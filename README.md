@@ -7,8 +7,12 @@ or share them to the app from Gallery, and it converts them straight away. On an
 bright parts (sun, lamps, sky, reflections) then glow brighter than white. On a normal screen the
 photos look as before.
 
-There are no settings. Version 2.4, package `com.example.ultrahdr`. Built for a Samsung Galaxy
+There are no settings. Version 1.0, package `com.example.ultrahdr`. Built for a Samsung Galaxy
 running One UI, and it should work on any Android 14 phone that shows Ultra HDR photos.
+
+Version 1.0 is the first public build. Before it, the app went through private builds numbered up
+to 2.4, and the code and tests still name two of them: version 1.9, whose gain map method is kept,
+and version 2.0, whose lossless output gets converted again.
 
 ## What happens to a photo
 
