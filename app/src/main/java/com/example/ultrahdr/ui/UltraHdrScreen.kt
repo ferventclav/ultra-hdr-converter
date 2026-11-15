@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
@@ -49,7 +50,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -381,6 +382,8 @@ private val PAGE_MAX_WIDTH = 720.dp
 private val BAR_MAX_WIDTH = 520.dp
 /** Room left under the last card for the floating toolbar. */
 private val BAR_ROOM = 96.dp
+/** The collapsed app bar under the status bar. The page fades out under it. */
+private val TOP_BAR_HEIGHT = 66.dp
 
 /** A grid row that spans the full width. */
 private fun LazyGridScope.wide(key: String, content: @Composable () -> Unit) {
@@ -389,7 +392,8 @@ private fun LazyGridScope.wide(key: String, content: @Composable () -> Unit) {
 
 /**
  * One UI's enlarged header: a big centred title low in the top third, one info line under it, and
- * its small button when there is something to undo.
+ * its small button when there is something to undo. With large text it grows downwards instead of
+ * pushing the title up under the top bar.
  */
 @Composable
 private fun ExpandedHeader(words: Heading, height: Dp, screenWidth: Dp, undo: (() -> Unit)?) {
@@ -398,7 +402,10 @@ private fun ExpandedHeader(words: Heading, height: Dp, screenWidth: Dp, undo: ((
     // A button fading out with the old heading must not act again once Undo has started.
     val currentUndo by rememberUpdatedState(undo)
     Column(
-        modifier = Modifier.fillMaxWidth().height(height).padding(start = 12.dp, end = 12.dp, bottom = 30.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = height)
+            .padding(start = 12.dp, end = 12.dp, top = TOP_BAR_HEIGHT, bottom = 30.dp),
         verticalArrangement = Arrangement.Bottom,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -437,13 +444,13 @@ private fun ExpandedHeader(words: Heading, height: Dp, screenWidth: Dp, undo: ((
 /** The collapsed app bar: the page melts into the page colour under it, and the title appears once the header has scrolled away. */
 @Composable
 private fun TopBar(backdrop: GlassBackdrop, page: Color, statusTop: Dp, title: String, collapsed: Boolean) {
-    Box(Modifier.fillMaxWidth().height(statusTop + 66.dp)) {
+    Box(Modifier.fillMaxWidth().height(statusTop + TOP_BAR_HEIGHT)) {
         FadingGlass(backdrop = backdrop, color = page, fromTop = true, modifier = Modifier.fillMaxSize())
         AnimatedVisibility(
             visible = collapsed,
             enter = fadeIn(tween(200, easing = OneUiEasing)),
             exit = fadeOut(tween(150)),
-            modifier = Modifier.padding(top = statusTop).height(66.dp).fillMaxWidth()
+            modifier = Modifier.padding(top = statusTop).height(TOP_BAR_HEIGHT).fillMaxWidth()
         ) {
             Box(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentAlignment = Alignment.CenterStart) {
                 Text(
@@ -568,7 +575,7 @@ private fun LazyGridScope.photoPage(state: UiState, actions: ScreenActions, thum
             SummaryCard(summarize(state.results.values, state.photos.size, phase.stopped))
         }
     }
-    items(state.photos, key = { it.uri.toString() }) { item ->
+    itemsIndexed(state.photos, key = { _, it -> it.uri.toString() }) { index, item ->
         val result = state.results[item.uri]
         val tileState = when {
             result != null -> TileState.DONE
@@ -577,6 +584,8 @@ private fun LazyGridScope.photoPage(state: UiState, actions: ScreenActions, thum
         }
         PhotoTile(
             item = item,
+            // Read out by TalkBack. File names like 20261108_181428.jpg are no use spoken.
+            label = "Photo ${index + 1} of ${state.photos.size}",
             state = tileState,
             result = result,
             onClick = { if (result?.converted == true) actions.openResult(result) },

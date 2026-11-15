@@ -29,6 +29,10 @@ import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.isHeading
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onAllNodesWithText
@@ -55,7 +59,7 @@ import com.example.ultrahdr.ui.GalleryActions
 import com.example.ultrahdr.ui.GalleryPage
 import com.example.ultrahdr.ui.GalleryState
 import com.example.ultrahdr.ui.Notice
-import com.example.ultrahdr.ui.TileChip
+import com.example.ultrahdr.ui.HdrChip
 import com.example.ultrahdr.ui.Phase
 import com.example.ultrahdr.ui.PromptCard
 import com.example.ultrahdr.ui.ScreenActions
@@ -295,6 +299,7 @@ class ScreensTest {
         )
     ) {
         compose.onNodeWithText("Done").assertIsDisplayed()
+        titleClearOfTopBar()
     }
 
     @Test
@@ -307,6 +312,7 @@ class ScreensTest {
         )
     ) {
         compose.onNodeWithText("5 not started").assertIsDisplayed()
+        titleClearOfTopBar()
     }
 
     // ---------------------------------------------------------------------------------- other screens
@@ -329,7 +335,23 @@ class ScreensTest {
 
     @Test
     @Config(sdk = [34], qualifiers = SMALL_PHONE)
-    fun smallPhoneWithLargeText() = screen("42_small_large_text", finishedState, fontScale = 1.3f)
+    fun smallPhoneWithLargeText() = screen("42_small_large_text", finishedState, fontScale = 1.3f) {
+        // Large text grows the header downwards instead of pushing the title under the top bar.
+        titleClearOfTopBar()
+        compose.onNodeWithText("Undo").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = TALL)
+    fun tilesSayWhichPhotoAndWhatHappened() {
+        compose.setContent {
+            UltraHdrTheme { UltraHdrScreen(state = finishedState, actions = ScreenActions(), thumbnail = painted) }
+        }
+        // TalkBack hears the place and the result, not a file name like 20261108_181428.jpg.
+        compose.onNode(hasContentDescription("Photo 1 of 7") and hasContentDescription("Converted")).assertExists()
+        compose.onNode(hasContentDescription("Photo 3 of 7") and hasContentDescription("already HDR")).assertExists()
+        compose.onAllNodes(hasContentDescription(photo(0).name)).assertCountEquals(0)
+    }
 
     @Test
     @Config(sdk = [34], qualifiers = SMALL_PHONE)
@@ -385,6 +407,29 @@ class ScreensTest {
         compose.onNodeWithText("Convert").assertIsDisplayed().assertIsNotEnabled()
         // Nothing to clear yet, so Clear is not in the bar.
         compose.onNodeWithText("Clear").assertDoesNotExist()
+        // The HDR label is part of what TalkBack says for its tile.
+        compose.onAllNodes(hasContentDescription("already HDR")).onFirst()
+            .assert(hasContentDescription("Photo, ", substring = true))
+    }
+
+    @Test
+    fun pickerControlsTakeTapsJustOutsideThem() {
+        var tabs = 0
+        var allowed = 0
+        compose.setContent {
+            UltraHdrTheme {
+                GalleryPage(
+                    state = galleryState(access = PhotoAccess.SOME),
+                    actions = GalleryActions(chooseAlbum = { tabs++ }, allowAccess = { allowed++ }),
+                    thumbnail = paintedLocal
+                )
+            }
+        }
+        // The tab is drawn 40 dp tall and Allow all 36 dp, the Enhance-X sizes; taps count up to 48 dp.
+        compose.onNodeWithText("Camera").performTouchInput { click(Offset(centerX, top - 3.dp.toPx())) }
+        assertEquals(1, tabs)
+        compose.onNodeWithText("Allow all").performTouchInput { click(Offset(centerX, bottom + 3.dp.toPx())) }
+        assertEquals(1, allowed)
     }
 
     @Test
@@ -540,6 +585,12 @@ class ScreensTest {
 
     private val recording: Boolean get() = System.getProperty("roborazzi.test.record") == "true"
 
+    /** The big title starts below the top bar, which fades the page out over its first 66 dp. */
+    private fun titleClearOfTopBar() {
+        val top = compose.onNode(isHeading()).getUnclippedBoundsInRoot().top
+        assertTrue("The title starts $top down, under the top bar", top >= 66.dp)
+    }
+
     private fun screen(
         name: String,
         state: UiState,
@@ -606,7 +657,7 @@ class ScreensTest {
         val image = remember(photo.id) { TestScenes.bitmap(photo.id.toInt(), 240, 240).asImageBitmap() }
         Box(modifier) {
             Image(image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-            if (photo.id % 4 == 2L) TileChip("HDR", Modifier.align(Alignment.BottomStart).padding(5.dp))
+            if (photo.id % 4 == 2L) HdrChip(Modifier.align(Alignment.BottomStart).padding(5.dp))
         }
     }
 

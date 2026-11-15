@@ -23,6 +23,9 @@ val OneUiLightDivider = Color(0xFFD4D4D8)
 val OneUiLightTextPrimary = Color(0xFF000000)
 val OneUiLightAccentTint = Color(0xFFE5EDFF)
 
+// The kit's error red, darkened until text on the light grey button fill passes 4.5:1.
+val DangerRed = Color(0xFFC42D25)
+
 /**
  * Colours the Material scheme has no slot for. Secondary text is a little darker (light theme) and
  * lighter (dark theme) than the kit's #848487, so 14sp text passes 4.5:1 on containers.
@@ -39,7 +42,10 @@ data class UhdrColors(
     val accentInk: Color,
     val accentTint: Color,
     val success: Color,
+    /** Error text and icons. Passes 4.5:1 on the page, cards and the grey button fill. */
     val danger: Color,
+    /** A fill behind white text, such as the Failed label over a photo. The same in both themes. */
+    val dangerFill: Color,
     /** Floating toolbar and its pills: kit glass-toolbar, 14dp blur. */
     val glassToolbar: Color,
     /** Dialogs: kit glass, 24dp blur. */
@@ -59,7 +65,8 @@ val LightUhdrColors = UhdrColors(
     accentInk = Color(0xFF2E6BEB),
     accentTint = OneUiLightAccentTint,
     success = Color(0xFF1A7F42),
-    danger = Color(0xFFC8372A),
+    danger = DangerRed,
+    dangerFill = DangerRed,
     glassToolbar = Color(0x99FFFFFF),
     glassDialog = Color(0xB3FCFCFF),
     glassPhoto = Color(0x802E2E30),
@@ -76,6 +83,8 @@ val DarkUhdrColors = UhdrColors(
     accentTint = OneUiDarkAccentTint,
     success = Color(0xFF45C278),
     danger = Color(0xFFFF6B5C),
+    // White on the light red above is 2.8:1, so labels keep the deep red in the dark theme too.
+    dangerFill = DangerRed,
     glassToolbar = Color(0x9917171A),
     glassDialog = Color(0xB317171A),
     glassPhoto = Color(0x802E2E30),

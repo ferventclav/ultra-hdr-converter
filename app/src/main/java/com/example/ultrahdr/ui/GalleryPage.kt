@@ -440,7 +440,8 @@ private fun TabRow(
         Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
             LazyRow(
                 state = tabs,
-                modifier = Modifier.fillMaxWidth(),
+                // The full 48 dp row, so taps just above or below a 40 dp tab still reach it.
+                modifier = Modifier.fillMaxWidth().fillMaxHeight(),
                 contentPadding = PaddingValues(start = m(4f), end = m(16f)),
                 horizontalArrangement = Arrangement.spacedBy(m(6f)),
                 verticalAlignment = Alignment.CenterVertically
@@ -819,7 +820,7 @@ fun GalleryThumb(photo: LocalPhoto, modifier: Modifier = Modifier) {
             val image = remember(shown) { shown.asImageBitmap() }
             Image(image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
-        if (hdr == true) TileChip("HDR", Modifier.align(Alignment.BottomStart).padding(5.dp))
+        if (hdr == true) HdrChip(Modifier.align(Alignment.BottomStart).padding(5.dp))
     }
 }
 

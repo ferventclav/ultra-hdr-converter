@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -230,10 +231,14 @@ fun PhotoThumbnail(uri: Uri, modifier: Modifier = Modifier) {
 
 enum class TileState { WAITING, WORKING, DONE }
 
-/** One photo in the grid: the picture and what has happened to it. */
+/**
+ * One photo in the grid: the picture and what has happened to it. TalkBack reads [label], then
+ * the tick or chip, such as "Photo 3 of 7, already HDR".
+ */
 @Composable
 fun PhotoTile(
     item: PhotoItem,
+    label: String,
     state: TileState,
     result: PhotoResult?,
     onClick: () -> Unit,
@@ -248,7 +253,7 @@ fun PhotoTile(
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable(enabled = result?.converted == true, onClickLabel = "Open in Gallery", onClick = onClick)
-            .semantics { contentDescription = item.name }
+            .semantics { contentDescription = label }
     ) {
         thumbnail(shown, Modifier.fillMaxSize())
 
@@ -271,19 +276,31 @@ fun PhotoTile(
             ) {
                 Icon(Icons.Rounded.Check, contentDescription = "Converted", tint = UhdrTheme.colors.onAccent, modifier = Modifier.size(15.dp))
             }
-            Outcome.ALREADY_HDR -> TileChip("HDR", badge)
+            Outcome.ALREADY_HDR -> HdrChip(badge)
             Outcome.NO_HIGHLIGHTS -> TileChip("Skipped", badge)
             Outcome.LEFT_ALONE -> TileChip("Left alone", badge)
-            Outcome.FAILED -> TileChip("Failed", badge, color = UhdrTheme.colors.danger)
-            null -> if (item.alreadyHdr && !item.redoable && state == TileState.WAITING) TileChip("HDR", badge)
+            Outcome.FAILED -> TileChip("Failed", badge, color = UhdrTheme.colors.dangerFill)
+            null -> if (item.alreadyHdr && !item.redoable && state == TileState.WAITING) HdrChip(badge)
         }
     }
 }
 
-/** A small label over a photo, on the kit's photo glass. */
+/**
+ * A small label over a photo, on the kit's photo glass. TalkBack reads [spoken] as part of the
+ * photo's own description, so a tile is one clear sentence.
+ */
 @Composable
-fun TileChip(label: String, modifier: Modifier = Modifier, color: Color = Color.Black.copy(alpha = 0.62f)) {
-    Box(modifier.background(color, RoundedCornerShape(8.dp)).padding(horizontal = 7.dp, vertical = 3.dp)) {
+fun TileChip(label: String, modifier: Modifier = Modifier, color: Color = Color.Black.copy(alpha = 0.62f), spoken: String = label) {
+    Box(
+        modifier
+            .clearAndSetSemantics { contentDescription = spoken }
+            .background(color, RoundedCornerShape(8.dp))
+            .padding(horizontal = 7.dp, vertical = 3.dp)
+    ) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = Color.White)
     }
 }
+
+/** The label on a photo that is HDR already, in the picker and in the grid. */
+@Composable
+fun HdrChip(modifier: Modifier = Modifier) = TileChip("HDR", modifier, spoken = "already HDR")
