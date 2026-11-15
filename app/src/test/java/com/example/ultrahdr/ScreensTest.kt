@@ -143,6 +143,7 @@ class ScreensTest {
     fun finished() = screen("20_finished", finishedState) {
         compose.onNodeWithText("Open in Gallery").assertIsDisplayed()
         compose.onNodeWithText("5 photos are now HDR").assertIsDisplayed()
+        compose.onNodeWithText("Undo").assertIsDisplayed()
     }
 
     @Test
@@ -162,6 +163,11 @@ class ScreensTest {
         )
     ) {
         compose.onNodeWithText("This photo couldn't be converted").assertIsDisplayed()
+    }
+
+    @Test
+    fun undoing() = screen("23_undoing", finishedState.copy(phase = Phase.Undoing, canUndo = false)) {
+        compose.onNodeWithText("Putting photos back").assertIsDisplayed()
     }
 
     @Test
@@ -445,7 +451,8 @@ class ScreensTest {
                     note = "No bright highlights to boost, so it was left as it is."
                 )
             ),
-            phase = Phase.Finished(stopped = false)
+            phase = Phase.Finished(stopped = false),
+            canUndo = true
         )
 
     private fun updated(i: Int) =

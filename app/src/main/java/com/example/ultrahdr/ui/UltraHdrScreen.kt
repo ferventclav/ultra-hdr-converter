@@ -113,6 +113,7 @@ class ScreenActions(
     val turnOnMediaManagement: () -> Unit = {},
     val notNow: () -> Unit = {},
     val copyReport: () -> Unit = {},
+    val undo: () -> Unit = {},
     val openResult: (PhotoResult) -> Unit = {},
     val openFirstResult: () -> Unit = {}
 )
@@ -138,6 +139,7 @@ fun UltraHdrApp(viewModel: UltraHdrViewModel) {
             dismissNotice = viewModel::dismissNotice,
             turnOnMediaManagement = viewModel::openMediaManagement,
             notNow = viewModel::notNow,
+            undo = viewModel::undo,
             copyReport = {
                 context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
                     android.content.ClipData.newPlainText("Ultra HDR report", viewModel.copyReport())
@@ -248,7 +250,8 @@ internal fun headingFor(state: UiState): Heading {
             Heading("Nothing changed", "Android wasn't allowed to update these photos. Try again and tap Allow.")
         }
         Phase.Preparing -> Heading("Getting ready", "Looking at $photos.")
-        is Phase.Working -> Heading("Converting", "${minOf(state.results.size + 1, phase.total)} of ${phase.total}. Keep the app open.")
+        is Phase.Working -> Heading("Converting", "${minOf(state.results.size + 1, phase.total)} of ${phase.total}.")
+        Phase.Undoing -> Heading("Undoing", "Putting the photos back as they were.")
         is Phase.Finished -> {
             val summary = summarize(state.results.values, count, phase.stopped)
             val info = when (summary.tone) {
@@ -510,7 +513,11 @@ private fun LazyGridScope.photoPage(state: UiState, actions: ScreenActions, thum
     val phase = state.phase
     if (phase is Phase.Finished) {
         wide("summary") {
-            SummaryCard(summarize(state.results.values, state.photos.size, phase.stopped), actions.copyReport)
+            SummaryCard(
+                summarize(state.results.values, state.photos.size, phase.stopped),
+                actions.copyReport,
+                onUndo = actions.undo.takeIf { state.canUndo }
+            )
         }
     }
     items(state.photos, key = { it.uri.toString() }) { item ->
@@ -531,8 +538,9 @@ private fun LazyGridScope.photoPage(state: UiState, actions: ScreenActions, thum
     }
 }
 
+/** [onUndo] is null when the batch changed nothing that can be put back. */
 @Composable
-private fun SummaryCard(summary: Summary, onCopyReport: () -> Unit) {
+private fun SummaryCard(summary: Summary, onCopyReport: () -> Unit, onUndo: (() -> Unit)?) {
     OneUiCard(Modifier.padding(bottom = 8.dp)) {
         Spacer(Modifier.height(6.dp))
         summary.lines.forEachIndexed { index, line ->
@@ -555,12 +563,13 @@ private fun SummaryCard(summary: Summary, onCopyReport: () -> Unit) {
                 }
             }
         }
-        TonalButton(
-            text = "Copy report",
-            onClick = onCopyReport,
-            height = 40.dp,
-            modifier = Modifier.padding(start = CardPadding, top = 4.dp, bottom = CardPadding)
-        )
+        Row(
+            Modifier.padding(start = CardPadding, end = CardPadding, top = 4.dp, bottom = CardPadding),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (onUndo != null) TonalButton(text = "Undo", onClick = onUndo, height = 40.dp)
+            TonalButton(text = "Copy report", onClick = onCopyReport, height = 40.dp)
+        }
     }
 }
 
@@ -568,7 +577,7 @@ private fun SummaryCard(summary: Summary, onCopyReport: () -> Unit) {
 // Floating toolbar
 // ----------------------------------------------------------------------------------------------
 
-private enum class BarMode { PICK, PREPARING, RETRY, WORKING, OPEN, DONE }
+private enum class BarMode { PICK, PREPARING, RETRY, WORKING, UNDOING, OPEN, DONE }
 
 @Composable
 private fun BottomBar(state: UiState, actions: ScreenActions, backdrop: GlassBackdrop, page: Color, modifier: Modifier) {
@@ -576,6 +585,7 @@ private fun BottomBar(state: UiState, actions: ScreenActions, backdrop: GlassBac
         Phase.Idle -> if (state.photos.isEmpty()) BarMode.PICK else BarMode.RETRY
         Phase.Preparing -> BarMode.PREPARING
         is Phase.Working -> BarMode.WORKING
+        Phase.Undoing -> BarMode.UNDOING
         is Phase.Finished -> if (state.results.values.any { it.converted && it.output != null }) BarMode.OPEN else BarMode.DONE
     }
     Box(modifier.fillMaxWidth()) {
@@ -627,6 +637,8 @@ private fun BottomBar(state: UiState, actions: ScreenActions, backdrop: GlassBac
                                     onAction = actions.stop
                                 )
                             }
+                            // Putting originals back is never stopped half way, so it has no button.
+                            BarMode.UNDOING -> ProgressRow("Putting photos back", null, null, {})
                             // "Done" takes only the room it needs, so the longer label never gets cut off.
                             BarMode.OPEN -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 TonalButton("Done", actions.done)
@@ -641,10 +653,16 @@ private fun BottomBar(state: UiState, actions: ScreenActions, backdrop: GlassBac
     }
 }
 
-/** A label over a slim One UI progress rail, with one action beside it. [progress] null means still working it out. */
+/**
+ * A label over a slim One UI progress rail, with one action beside it (none when [action] is null).
+ * [progress] null means still working it out.
+ */
 @Composable
-private fun ProgressRow(label: String, progress: Float?, action: String, onAction: () -> Unit, warns: Boolean = true) {
-    Row(Modifier.fillMaxWidth().height(52.dp).padding(start = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun ProgressRow(label: String, progress: Float?, action: String?, onAction: () -> Unit, warns: Boolean = true) {
+    Row(
+        Modifier.fillMaxWidth().height(52.dp).padding(start = 18.dp, end = if (action == null) 18.dp else 0.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Column(Modifier.weight(1f)) {
             Text(
                 text = label,
@@ -670,8 +688,10 @@ private fun ProgressRow(label: String, progress: Float?, action: String, onActio
                 )
             }
         }
-        Spacer(Modifier.width(14.dp))
-        TonalButton(action, onAction, height = 52.dp, textColor = if (warns) UhdrTheme.colors.danger else UhdrTheme.colors.accentInk)
+        if (action != null) {
+            Spacer(Modifier.width(14.dp))
+            TonalButton(action, onAction, height = 52.dp, textColor = if (warns) UhdrTheme.colors.danger else UhdrTheme.colors.accentInk)
+        }
     }
 }
 

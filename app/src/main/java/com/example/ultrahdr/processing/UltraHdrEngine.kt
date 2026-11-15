@@ -17,7 +17,8 @@ internal object UltraHdrEngine {
 
     /**
      * Saving a picture again means holding all of it in memory. Up to this size that is safe, so a
-     * 24 MP photo stays whole. Anything larger is halved for a copy and left alone in place.
+     * 24 MP photo stays whole. A larger photo is fine when its picture is kept as it is
+     * ([writeLossless]). Otherwise it is halved for a copy and left alone in place.
      */
     const val MAX_REENCODE_PIXELS = 26_000_000L
 
@@ -126,6 +127,8 @@ internal object UltraHdrEngine {
 
     /**
      * Writes the original JPEG bytes with the gain map attached. Nothing in the photo is re-encoded.
+     * [plan] must come from the picture as its pixels are stored ([decodeSmall]), not turned upright:
+     * a gain map inside a file follows the file's own orientation, as camera photos do.
      * Returns false when the file's layout can't take it.
      */
     fun writeLossless(
@@ -134,7 +137,8 @@ internal object UltraHdrEngine {
         plan: GainMapPlan,
         out: File
     ): Boolean {
-        val gainMap = gainMapJpeg(plan)
+        // The quality version 1.9's gain maps were saved at: the platform encoder uses the photo's own.
+        val gainMap = gainMapJpeg(plan, quality = 96)
         val written = BufferedOutputStream(FileOutputStream(out), 1 shl 16).use { stream ->
             UltraHdrContainer.write(jpeg, layout, gainMap, plan.ratioMax, stream)
         }
@@ -146,7 +150,7 @@ internal object UltraHdrEngine {
 
     /**
      * Decodes [staged] and saves it again as a new Ultra HDR JPEG through the platform encoder.
-     * This is version 1.9's conversion and the one every photo goes through.
+     * This is version 1.9's conversion, used when the photo's layout can't take [writeLossless].
      */
     fun writeReencoded(staged: File, strength: HdrStrength, out: File, quality: Int = 96): Reencoded? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

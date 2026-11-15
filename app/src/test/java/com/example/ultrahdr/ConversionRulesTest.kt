@@ -104,8 +104,9 @@ class ConversionRulesTest {
         canReadLocation: Boolean = true,
         isJpeg: Boolean = true,
         isMotionPhoto: Boolean = false,
-        pixels: Long = 12_000_000
-    ) = SaveFacts(replaceOriginal, isCloud, hasTarget, bytesFromTarget, canReadLocation, isJpeg, isMotionPhoto, pixels)
+        pixels: Long = 12_000_000,
+        keepsPicture: Boolean = false
+    ) = SaveFacts(replaceOriginal, isCloud, hasTarget, bytesFromTarget, canReadLocation, isJpeg, isMotionPhoto, pixels, keepsPicture)
 
     // ---------------------------------------------------------------------------------------
     // Where a photo may be saved
@@ -183,7 +184,7 @@ class ConversionRulesTest {
         assertTrue(checksBefore.isNotEmpty())
 
         val takenAt = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse("2026:11:14 23:15:00")!!.time
-        ImageExifHelper.stampCopyDate(file, file.readBytes(), takenAt)
+        ImageExifHelper.stampCaptureDate(file, file.readBytes(), takenAt)
 
         assertEquals(takenAt, ImageExifHelper.getCaptureTimestamp(file))
         assertEquals("date", ImageExifHelper.metadataKinds(file))
@@ -205,7 +206,7 @@ class ConversionRulesTest {
         for (providerTime in listOf(pickerProviderDate, null)) {
             val out = tmp.newFile().apply { delete() }
             assertNotNull(UltraHdrEngine.writeReencoded(staged, HdrStrength.BALANCED, out))
-            ImageExifHelper.stampCopyDate(out, source, providerTime)
+            ImageExifHelper.stampCaptureDate(out, source, providerTime)
             val exif = ExifInterface(out.absolutePath)
             assertEquals("route $providerTime", "2025:07:07 00:11:16", exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL))
             assertEquals("route $providerTime", "+05:30", exif.getAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL))
@@ -224,7 +225,7 @@ class ConversionRulesTest {
         val out = tmp.newFile().apply { delete() }
         assertNotNull(UltraHdrEngine.writeReencoded(staged, HdrStrength.BALANCED, out))
         val before = out.readBytes()
-        ImageExifHelper.stampCopyDate(out, staged.readBytes(), 1L)
+        ImageExifHelper.stampCaptureDate(out, staged.readBytes(), 1L)
         assertArrayEquals(before, out.readBytes())
     }
 
@@ -238,7 +239,7 @@ class ConversionRulesTest {
         val out = tmp.newFile().apply { delete() }
         assertNotNull(UltraHdrEngine.writeReencoded(staged, HdrStrength.BALANCED, out))
         // The date stamp saves the EXIF once more; the exact values must survive that too.
-        ImageExifHelper.stampCopyDate(out, staged.readBytes(), 1_700_000_000_000L)
+        ImageExifHelper.stampCaptureDate(out, staged.readBytes(), 1_700_000_000_000L)
 
         val exif = ExifInterface(out.absolutePath)
         assertEquals(1.0 / 1593, exif.getAttributeDouble(ExifInterface.TAG_EXPOSURE_TIME, 0.0), 1e-12)
@@ -384,8 +385,120 @@ class ConversionRulesTest {
         assertEquals(2, lines.size)
         assertEquals(
             "20261114_190629.jpg | already_hdr | Already HDR, left as it is. | from picker | real file found | " +
-                "bytes real file | hdr checks queue+markers+decoder | size 7684869 -> - | metadata date+camera+gps -> -",
+                "bytes real file | hdr checks queue+markers+decoder | picture - | size 7684869 -> - | metadata date+camera+gps -> -",
             lines[1]
         )
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // The picture is kept as it is, with the gain map behind it
+    // ---------------------------------------------------------------------------------------
+
+    /** A rotated camera photo with GPS, as the phone stores it. */
+    private fun rotatedWithGps(): ByteArray {
+        val staged = tmp.newFile().apply { writeBytes(sceneJpeg(TestScenes.LAMP, 800, 600)) }
+        ExifInterface(staged.absolutePath).apply {
+            setLatLong(48.8584, 2.2945)
+            setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_ROTATE_90.toString())
+            setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, "2024:01:14 16:16:55")
+            saveAttributes()
+        }
+        return staged.readBytes()
+    }
+
+    private fun exifBlock(jpeg: ByteArray): ByteArray {
+        var pos = 2
+        while (pos + 4 <= jpeg.size) {
+            val length = ((jpeg[pos + 2].toInt() and 0xFF) shl 8) or (jpeg[pos + 3].toInt() and 0xFF)
+            val isExif = jpeg[pos + 1] == 0xE1.toByte() && String(jpeg, pos + 4, 4, Charsets.ISO_8859_1) == "Exif"
+            if (isExif) return jpeg.copyOfRange(pos, pos + 2 + length)
+            pos += 2 + length
+        }
+        error("no EXIF")
+    }
+
+    @Test
+    fun aTooLargePhotoIsUpdatedWhenItsPictureIsKept() {
+        assertEquals(SavePlan.InPlace, SaveDecision.decide(facts(pixels = UltraHdrEngine.MAX_REENCODE_PIXELS + 1, keepsPicture = true)))
+    }
+
+    @Test
+    fun theGainMapGoesBehindTheUntouchedPicture() {
+        val original = rotatedWithGps()
+        val hdr = losslessFrom(original)
+
+        assertTrue("same compressed picture, so no colour detail is lost", UltraHdrContainer.samePicture(original, hdr))
+        assertArrayEquals("EXIF byte for byte", exifBlock(original), exifBlock(hdr))
+        val exif = ExifInterface(hdr.inputStream())
+        assertEquals("orientation kept", ExifInterface.ORIENTATION_ROTATE_90, exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, -1))
+        assertNotNull("GPS kept", exif.latLong)
+        // The PC's decoder never reports gain maps in these files; on a phone the same writer's
+        // files pass the decoder check, and that check runs again before anything is replaced.
+        assertTrue("labelled and laid out as Ultra HDR", UltraHdrEngine.hdrChecks(hdr).containsAll(listOf("markers", "layout")))
+        assertFalse(UltraHdrContainer.samePicture(original, sceneJpeg(TestScenes.SNOW, 800, 600)))
+    }
+
+    /** The gain map follows the picture as it is stored, as on a camera photo, not the upright view. */
+    @Test
+    fun aKeptPicturesGainMapIsInItsStoredOrientation() {
+        val small = UltraHdrEngine.decodeSmall(rotatedWithGps())!!
+        val plan = UltraHdrEngine.plan(small, HdrStrength.BALANCED)
+        assertTrue("landscape as stored, though it shows as portrait", plan.width > plan.height)
+    }
+
+    @Test
+    fun aDateWrittenIntoAKeptPictureLeavesItAsItWas() {
+        val original = rotatedWithGps()
+        val file = tmp.newFile().apply { writeBytes(losslessFrom(original)) }
+        val takenAt = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse("2026:11:14 23:15:00")!!.time
+        ImageExifHelper.stampCaptureDate(file, original, takenAt)
+
+        val exif = ExifInterface(file.absolutePath)
+        assertNotNull(exif.getAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL))
+        assertEquals("rotation left alone", ExifInterface.ORIENTATION_ROTATE_90, exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, -1))
+        val bytes = file.readBytes()
+        assertTrue(UltraHdrEngine.hdrChecks(bytes).containsAll(listOf("markers", "layout")))
+        assertTrue(UltraHdrContainer.samePicture(original, bytes))
+        // Redo still works: the gain map comes back out with the picture untouched.
+        val stripped = UltraHdrContainer.strip(bytes)
+        assertNotNull("strip after the date was written", stripped)
+        assertTrue(UltraHdrContainer.samePicture(original, stripped!!))
+        assertTrue(UltraHdrEngine.hdrChecks(stripped).isEmpty())
+    }
+
+    @Test
+    fun stripAfterADateKeepsThePhotosOwnXmp() {
+        val own = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">" +
+            "<rdf:Description rdf:about=\"\" xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" xmp:Rating=\"5\"/></rdf:RDF></x:xmpmeta>"
+        val original = afterSoi(sceneJpeg(TestScenes.LAMP, 800, 600), segment(0xE1, xmp(own)))
+        val file = tmp.newFile().apply { writeBytes(losslessFrom(original)) }
+        ImageExifHelper.stampCaptureDate(file, original, 1_700_000_000_000L)
+        val stripped = UltraHdrContainer.strip(file.readBytes())
+        assertNotNull(stripped)
+        assertTrue("the rating survives", String(stripped!!, Charsets.ISO_8859_1).contains("xmp:Rating=\"5\""))
+        assertTrue(UltraHdrEngine.hdrChecks(stripped).isEmpty())
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Undo
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    fun undoKeepsTheBackupAndForgetsItWhenCleared() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        com.example.ultrahdr.processing.UndoStore.clear(context)
+        val backup = tmp.newFile().apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val media = Uri.parse("content://media/external/images/media/5")
+        val kept = com.example.ultrahdr.processing.UndoStore.keepOriginal(
+            context, backup, com.example.ultrahdr.processing.PhotoTarget(File("/sdcard/DCIM/a.jpg"), media),
+            fileTime = 1_700_000_000_000L, newSize = 99L, name = "a.jpg"
+        )
+        assertTrue(kept)
+        assertFalse("moved, not copied", backup.exists())
+        com.example.ultrahdr.processing.UndoStore.keepCopy(context, Uri.parse("content://media/external/images/media/6"))
+        assertTrue(com.example.ultrahdr.processing.UndoStore.any(context))
+        assertEquals("only the updated photo needs Android's say-so", listOf(media), com.example.ultrahdr.processing.UndoStore.photosToPutBack(context))
+        com.example.ultrahdr.processing.UndoStore.clear(context)
+        assertFalse(com.example.ultrahdr.processing.UndoStore.any(context))
     }
 }

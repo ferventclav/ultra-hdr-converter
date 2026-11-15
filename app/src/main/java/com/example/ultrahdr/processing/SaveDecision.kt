@@ -22,7 +22,9 @@ data class SaveFacts(
     val canReadLocation: Boolean,
     val isJpeg: Boolean,
     val isMotionPhoto: Boolean,
-    val pixels: Long
+    val pixels: Long,
+    /** The gain map can go behind the picture as it is, so the picture is never decoded in full. */
+    val keepsPicture: Boolean = false
 )
 
 /**
@@ -42,10 +44,11 @@ object SaveDecision {
         !f.isJpeg -> SavePlan.LeaveAlone("Not a JPEG, so it was left as it is.")
         f.isMotionPhoto -> SavePlan.LeaveAlone("Motion photo. Saving it again would remove its video.")
         f.pixels <= 0 -> SavePlan.LeaveAlone("Couldn't read the picture's size, so it wasn't changed.")
-        f.pixels > UltraHdrEngine.MAX_REENCODE_PIXELS ->
-            SavePlan.LeaveAlone("Too large to save again safely, so it wasn't changed.")
+        f.pixels > UltraHdrEngine.MAX_REENCODE_PIXELS && !f.keepsPicture -> SavePlan.LeaveAlone(TOO_LARGE)
         else -> SavePlan.InPlace
     }
+
+    const val TOO_LARGE = "Too large to save again safely, so it wasn't changed."
 }
 
 /** Plain text for the clipboard: one header line, then one line per photo. */
@@ -64,6 +67,7 @@ object CopyReport {
             "real file ${if (t.realFileFound) "found" else "not found"}",
             "bytes ${t.bytesFrom.ifEmpty { "-" }}",
             "hdr checks ${t.hdrChecks.joinToString("+").ifEmpty { "none" }}",
+            "picture ${t.picture.ifEmpty { "-" }}",
             "size ${size(t.sizeBefore)} -> ${size(t.sizeAfter)}",
             "metadata ${t.metadataBefore.ifEmpty { "-" }} -> ${t.metadataAfter.ifEmpty { "-" }}"
         ).joinToString(" | ")

@@ -29,7 +29,8 @@ internal object RecoveryStore {
         original: ByteArray,
         name: String,
         target: PhotoTarget,
-        expectedSize: Long
+        expectedSize: Long,
+        fileTime: Long? = null
     ): Ticket {
         val dir = File(context.filesDir, DIR).apply { mkdirs() }
         val id = UUID.randomUUID().toString()
@@ -45,7 +46,8 @@ internal object RecoveryStore {
                 name,
                 target.file?.absolutePath.orEmpty(),
                 target.mediaUri?.toString().orEmpty(),
-                expectedSize.toString()
+                expectedSize.toString(),
+                (fileTime ?: -1L).toString()
             ).joinToString("\n")
         )
         return Ticket(data, meta)
@@ -54,6 +56,15 @@ internal object RecoveryStore {
     fun commit(ticket: Ticket) {
         ticket.meta.delete()
         ticket.data.delete()
+    }
+
+    /**
+     * Ends the ticket but hands its backup over instead of deleting it (for Undo). Once the ticket
+     * is gone the backup is no longer put back at launch.
+     */
+    fun release(ticket: Ticket): File {
+        ticket.meta.delete()
+        return ticket.data
     }
 
     /** Run once at launch. Puts back any original whose update was cut off. */
@@ -91,7 +102,8 @@ internal object RecoveryStore {
                 data.delete()
                 continue
             }
-            if (MediaStoreSaver.writeBytesInPlace(context, target, original)) {
+            val fileTime = lines.getOrNull(4)?.toLongOrNull()?.takeIf { it > 0 }
+            if (MediaStoreSaver.writeBytesInPlace(context, target, original, fileTime)) {
                 restored++
                 meta.delete()
                 data.delete()

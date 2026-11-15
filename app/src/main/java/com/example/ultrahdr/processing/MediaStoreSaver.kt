@@ -153,6 +153,19 @@ object MediaStoreSaver {
         return readStream(context, uri)?.let { OriginalBytes(it, fromTarget = false) }
     }
 
+    /** The photo's bytes as they are now, from its real file. */
+    internal fun readCurrent(context: Context, target: PhotoTarget): ByteArray? = readTarget(context, target)
+
+    /**
+     * True when the app may set the photo's last-change time, so a rewritten photo can keep it.
+     * Tried by setting the time it already has, which changes nothing.
+     */
+    fun canKeepFileTime(target: PhotoTarget): Boolean {
+        val file = target.file ?: return false
+        val time = file.lastModified().takeIf { it > 0 } ?: return false
+        return runCatching { file.setLastModified(time) }.getOrDefault(false)
+    }
+
     private fun readTarget(context: Context, target: PhotoTarget): ByteArray? {
         val file = target.file
         if (file != null && file.canRead() && file.length() in 1..MAX_FILE_BYTES) {
@@ -228,16 +241,25 @@ object MediaStoreSaver {
      * Replaces the photo's contents with [content], keeping the same file, name and gallery entry.
      * The original bytes are parked in [RecoveryStore] until the new file is fully on disk, and are
      * written back straight away if anything goes wrong. Never makes a copy.
+     *
+     * [upright]: the new picture was saved again upright, so the gallery's rotation label is reset,
+     * as version 1.9 did. [fileTime] is the last-change time the file gets afterwards (null keeps
+     * the one it has), because a photo with no date inside it (WhatsApp's) sorts by that time and
+     * would otherwise jump to today. With [keepForUndo] the backup is kept for [UndoStore].
      */
     suspend fun replaceInPlace(
         context: Context,
         target: PhotoTarget,
         content: File,
         original: ByteArray,
-        name: String
+        name: String,
+        upright: Boolean,
+        fileTime: Long? = null,
+        keepForUndo: Boolean = true
     ): InPlace = withContext(Dispatchers.IO + NonCancellable) {
+        val time = fileTime ?: target.file?.lastModified()?.takeIf { it > 0 }
         val ticket = try {
-            RecoveryStore.begin(context, original, name, target, content.length())
+            RecoveryStore.begin(context, original, name, target, content.length(), time)
         } catch (_: Throwable) {
             return@withContext InPlace.NO_BACKUP
         }
@@ -246,8 +268,15 @@ object MediaStoreSaver {
         }
         when (state) {
             WriteState.DONE_FILE, WriteState.DONE_MEDIA -> {
-                RecoveryStore.commit(ticket)
-                afterWrite(context, target, state)
+                if (keepForUndo) {
+                    val kept = runCatching {
+                        UndoStore.keepOriginal(context, RecoveryStore.release(ticket), target, time, content.length(), name)
+                    }.getOrDefault(false)
+                    if (!kept) RecoveryStore.commit(ticket)
+                } else {
+                    RecoveryStore.commit(ticket)
+                }
+                afterWrite(context, target, state, upright, time)
                 InPlace.DONE
             }
             WriteState.UNTOUCHED -> {
@@ -259,34 +288,41 @@ object MediaStoreSaver {
                 val back = writeInPlace(context, target) { it.write(original) }
                 if (back == WriteState.DONE_FILE || back == WriteState.DONE_MEDIA) {
                     RecoveryStore.commit(ticket)
-                    afterWrite(context, target, back)
+                    afterWrite(context, target, back, upright = false, time = time)
                 }
                 InPlace.FAILED
             }
         }
     }
 
-    /** Tells the gallery about the new contents, the way version 1.9 did for each kind of write. */
-    private fun afterWrite(context: Context, target: PhotoTarget, state: WriteState) {
-        if (state == WriteState.DONE_FILE) {
-            val path = target.file?.absolutePath ?: return
-            MediaScannerConnection.scanFile(context, arrayOf(path), arrayOf("image/jpeg"), null)
-        } else {
-            val media = target.mediaUri ?: return
+    /**
+     * Gives the file back its last-change time, then tells the gallery about the new contents:
+     * a fresh scan when the file was written directly or its time was put back, and for a
+     * picture saved again upright through the gallery entry, version 1.9's rotation reset.
+     */
+    private fun afterWrite(context: Context, target: PhotoTarget, state: WriteState, upright: Boolean, time: Long?) {
+        val file = target.file
+        val timeKept = time != null && file != null && runCatching { file.setLastModified(time) }.getOrDefault(false)
+        if (state == WriteState.DONE_MEDIA && upright) {
+            val media = target.mediaUri
             try {
-                if (isMediaStoreImage(media)) {
+                if (media != null && isMediaStoreImage(media)) {
                     val values = ContentValues().apply { put(MediaStore.Images.Media.ORIENTATION, 0) }
                     context.contentResolver.update(media, values, null, null)
                 }
             } catch (_: Throwable) {
             }
         }
+        if (file != null && (state == WriteState.DONE_FILE || timeKept || !upright)) {
+            MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), arrayOf("image/jpeg"), null)
+        }
     }
 
-    internal fun writeBytesInPlace(context: Context, target: PhotoTarget, bytes: ByteArray): Boolean {
+    /** Writes [bytes] (an original being put back) over the photo. */
+    internal fun writeBytesInPlace(context: Context, target: PhotoTarget, bytes: ByteArray, fileTime: Long? = null): Boolean {
         val state = writeInPlace(context, target) { it.write(bytes) }
         if (state == WriteState.DONE_FILE || state == WriteState.DONE_MEDIA) {
-            afterWrite(context, target, state)
+            afterWrite(context, target, state, upright = false, time = fileTime)
             return true
         }
         return false
@@ -349,15 +385,31 @@ object MediaStoreSaver {
         }
     }
 
-    /** Saves [content] as a new photo in Pictures/UltraHDR. */
+    /** [isNew] is false when an earlier copy of the same picture was written over instead. */
+    class SavedCopy(val uri: Uri, val isNew: Boolean)
+
+    /**
+     * Saves [content] as a photo in Pictures/UltraHDR. When this app already saved a copy of the
+     * same picture there under the same name, that copy is written over, so converting a cloud
+     * photo twice never leaves two of it in Gallery.
+     */
     suspend fun saveCopy(
         context: Context,
         content: File,
         displayName: String,
         captureTime: Long?
-    ): Result<Uri> = withContext(Dispatchers.IO + NonCancellable) {
+    ): Result<SavedCopy> = withContext(Dispatchers.IO + NonCancellable) {
         val resolver = context.contentResolver
         val safeName = displayName.replace(Regex("""[\\/:*?"<>|]"""), "_")
+        earlierCopy(context, safeName, content)?.let { earlier ->
+            val replaced = runCatching {
+                resolver.openOutputStream(earlier, "wt").use { output ->
+                    if (output == null) throw IOException("Failed to open the earlier copy")
+                    FileInputStream(content).use { it.copyTo(output, 1 shl 16) }
+                }
+            }.isSuccess
+            if (replaced) return@withContext Result.success(SavedCopy(earlier, isNew = false))
+        }
         try {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, safeName)
@@ -384,7 +436,7 @@ object MediaStoreSaver {
                 values.clear()
                 values.put(MediaStore.Images.Media.IS_PENDING, 0)
                 resolver.update(imageUri, values, null, null)
-                Result.success(imageUri)
+                Result.success(SavedCopy(imageUri, isNew = true))
             } catch (e: Throwable) {
                 resolver.delete(imageUri, null, null)
                 throw e
@@ -392,6 +444,31 @@ object MediaStoreSaver {
         } catch (e: Throwable) {
             Result.failure(e)
         }
+    }
+
+    /** A copy this app saved before in Pictures/UltraHDR, named [name], holding the same picture as [content]. */
+    private fun earlierCopy(context: Context, name: String, content: File): Uri? = try {
+        val fresh = content.readBytes()
+        context.contentResolver.query(
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+            arrayOf(MediaStore.Images.Media._ID),
+            "${MediaStore.Images.Media.RELATIVE_PATH} = ? AND ${MediaStore.Images.Media.DISPLAY_NAME} = ? AND " +
+                "${MediaStore.MediaColumns.OWNER_PACKAGE_NAME} = ?",
+            arrayOf(Environment.DIRECTORY_PICTURES + "/" + COPY_FOLDER + "/", name, context.packageName),
+            null
+        )?.use { cursor ->
+            var found: Uri? = null
+            while (found == null && cursor.moveToNext()) {
+                val uri = ContentUris.withAppendedId(
+                    MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), cursor.getLong(0)
+                )
+                val earlier = readStream(context, uri)
+                if (earlier != null && UltraHdrContainer.samePicture(earlier, fresh)) found = uri
+            }
+            found
+        }
+    } catch (_: Throwable) {
+        null
     }
 
     // ---------------------------------------------------------------------------------------

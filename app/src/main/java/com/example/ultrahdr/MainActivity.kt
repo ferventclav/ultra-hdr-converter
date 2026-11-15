@@ -18,6 +18,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.ultrahdr.processing.LocalPhotos
 import com.example.ultrahdr.processing.PhotoAccess
+import com.example.ultrahdr.ui.ConversionSession
 import com.example.ultrahdr.ui.UiEvent
 import com.example.ultrahdr.ui.UltraHdrApp
 import com.example.ultrahdr.ui.UltraHdrViewModel
@@ -44,6 +45,11 @@ class MainActivity : ComponentActivity() {
         viewModel.onWritePermissionResult(granted = result.resultCode == RESULT_OK)
     }
 
+    /** The batch runs either way; without this its progress just doesn't show outside the app. */
+    private val notificationLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+
     /** Settings, Apps, Special access, Media management, for this app only. */
     private val mediaManagementLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -68,6 +74,7 @@ class MainActivity : ComponentActivity() {
                         )
                         UiEvent.OpenMediaManagement -> openMediaManagement()
                         UiEvent.RequestPhotoAccess -> requestPhotoAccess()
+                        UiEvent.RequestNotifications -> notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     }
                 }
             }
@@ -99,6 +106,17 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.ACCESS_MEDIA_LOCATION
             )
         )
+    }
+
+    override fun onStart() {
+        super.onStart()
+        ConversionSession.screensShown++
+        ConversionService.clearDoneNote(this)
+    }
+
+    override fun onStop() {
+        ConversionSession.screensShown = (ConversionSession.screensShown - 1).coerceAtLeast(0)
+        super.onStop()
     }
 
     override fun onResume() {

@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.ultrahdr"
         minSdk = 34 // Android 14+ for native Gainmap & Ultra HDR support
         targetSdk = 35
-        versionCode = 19
-        versionName = "1.2"
+        versionCode = 20
+        versionName = "1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

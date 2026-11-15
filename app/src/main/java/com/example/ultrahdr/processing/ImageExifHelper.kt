@@ -187,15 +187,15 @@ object ImageExifHelper {
     ).joinToString("+").ifEmpty { "none" }
 
     /**
-     * Gives a finished HDR copy a capture date that every gallery reads the same way, whichever
+     * Gives a finished HDR file a capture date that every gallery reads the same way, whichever
      * route the photo came by. The date is the photo's own capture date, else its last edit date
-     * (all that a Lightroom or WhatsApp file carries), else [providerTime] from the picker or the
-     * sharing app. It is written with its time zone, because Android's media scanner throws away a
-     * capture date without one once the file is more than a day newer than the date, and the copy
-     * then sorts as taken today. Repairs the MPF index the new EXIF moved. Does nothing when the
-     * copy already has both, or when no date is known.
+     * (all that a Lightroom file carries), else [providerTime]: what the picker, the sharing app or
+     * the gallery said. It is written with its time zone, because Android's media scanner throws
+     * away a capture date without one once the file is more than a day newer than the date, and the
+     * photo then sorts as taken today. The orientation label is left as it is. Repairs the MPF index
+     * the new EXIF moved. Does nothing when the file already has both, or when no date is known.
      */
-    fun stampCopyDate(file: File, source: ByteArray, providerTime: Long?) {
+    fun stampCaptureDate(file: File, source: ByteArray, providerTime: Long?) {
         val exif = try {
             ExifInterface(ByteArrayInputStream(source))
         } catch (_: Exception) {
@@ -221,7 +221,7 @@ object ImageExifHelper {
             values[ExifInterface.TAG_DATETIME_DIGITIZED] = text
             values[ExifInterface.TAG_OFFSET_TIME_DIGITIZED] = offset
         }
-        applyMetadata(file, values)
+        applyMetadata(file, values, resetOrientation = false)
         JpegMpfFixer.fixMpfAndContainer(file)
     }
 
@@ -325,9 +325,11 @@ object ImageExifHelper {
     }
 
     /**
-     * Writes all extracted metadata into the target Ultra HDR file and marks ORIENTATION_NORMAL.
+     * Writes [metadata] into the target Ultra HDR file. With [resetOrientation] it is also marked
+     * ORIENTATION_NORMAL, for a picture that was saved again upright. A file that kept its own
+     * picture keeps its own orientation.
      */
-    fun applyMetadata(targetFile: File, metadata: Map<String, String>) {
+    fun applyMetadata(targetFile: File, metadata: Map<String, String>, resetOrientation: Boolean = true) {
         try {
             val targetExif = ExifInterface(targetFile.absolutePath)
 
@@ -338,7 +340,7 @@ object ImageExifHelper {
             }
 
             // Upright orientation since pixels were physically rotated
-            try {
+            if (resetOrientation) try {
                 targetExif.setAttribute(
                     ExifInterface.TAG_ORIENTATION,
                     ExifInterface.ORIENTATION_NORMAL.toString()

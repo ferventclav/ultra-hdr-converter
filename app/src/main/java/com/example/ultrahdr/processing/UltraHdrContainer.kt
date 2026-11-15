@@ -380,35 +380,40 @@ internal object UltraHdrContainer {
      * the file was not made by [write] (a camera's HDR photo, another app's, or one this app had to
      * save again). Nothing is decoded, so the picture that comes back is the original picture.
      *
-     * It is byte for byte the original, with one small exception: a photo that had XMP of its own
-     * may get that XMP back with its spare padding or a blank before the closing bracket gone.
+     * It is byte for byte the original, with two small exceptions: a photo that had XMP of its own
+     * may get that XMP back with its spare padding or a blank before the closing bracket gone, and
+     * a date this app wrote into the EXIF afterwards stays in it.
      */
     fun strip(jpeg: ByteArray): ByteArray? {
         if (!isJpeg(jpeg)) return null
 
-        // 1. Find the pair of blocks only this writer puts side by side: the ISO marker and the index.
+        // 1. Find the pair of blocks only this writer puts side by side, the ISO marker and the
+        //    index, and every XMP block. Saving a date into the EXIF afterwards can move the XMP
+        //    to the front, so it may sit before or after the pair.
         var pos = 2
-        var before = -1
         var isoStart = -1
+        var scanStart = -1
+        val xmpBlocks = mutableListOf<IntRange>()
         while (pos + 4 <= jpeg.size) {
             if (jpeg[pos] != FF) return null
             val marker = jpeg[pos + 1].toInt() and 0xFF
-            if (marker == 0xDA || marker == 0x00 || marker == 0x01 || marker == 0xFF || marker in 0xD0..0xD9) {
-                return null
+            if (marker == 0xDA) {
+                scanStart = pos
+                break
             }
+            if (marker == 0x00 || marker == 0x01 || marker == 0xFF || marker in 0xD0..0xD9) return null
             val segLen = u16(jpeg, pos + 2)
             val segEnd = pos + 2 + segLen
             if (segLen < 2 || segEnd > jpeg.size) return null
-            if (marker == 0xE2 && segLen - 2 == ISO_SIG.size + 4 &&
+            if (isoStart < 0 && marker == 0xE2 && segLen - 2 == ISO_SIG.size + 4 &&
                 startsWith(jpeg, pos + 4, segLen - 2, ISO_SIG)
             ) {
                 isoStart = pos
-                break
             }
-            before = pos
+            if (marker == 0xE1 && startsWith(jpeg, pos + 4, segLen - 2, XMP_SIG)) xmpBlocks += pos until segEnd
             pos = segEnd
         }
-        if (isoStart < 0) return null
+        if (isoStart < 0 || scanStart < 0) return null
         val mpfStart = isoStart + 4 + ISO_SIG.size + 4
         val mpfEnd = mpfStart + MPF_SEGMENT_SIZE
         if (mpfEnd > jpeg.size || jpeg[mpfStart] != FF || jpeg[mpfStart + 1] != 0xE2.toByte() ||
@@ -432,47 +437,75 @@ internal object UltraHdrContainer {
         val max = Regex("""hdrgm:GainMapMax="([0-9.]+)"""").find(described)?.groupValues?.get(1) ?: return null
         if (described != gainMapXmpText(max)) return null
 
-        val out = java.io.ByteArrayOutputStream(jpeg.size - gainMapSize)
-        val afterGainMap = primarySize + gainMapSize
+        if (scanStart > primarySize) return null
 
-        // 4a. The photo had no XMP, so a new one was put in just ahead of the pair. Drop all three.
-        val addedXmp = if (before >= 0) xmpSegmentText(jpeg, before, isoStart) else null
-        if (addedXmp != null && addedXmp == newPrimaryXmp(gainMapSize)) {
-            out.write(jpeg, 0, before)
-            out.write(jpeg, mpfEnd, primarySize - mpfEnd)
-            out.write(jpeg, afterGainMap, jpeg.size - afterGainMap)
-            return out.toByteArray()
-        }
-
-        // 4b. The photo had XMP of its own, which was extended. Take the extension back out.
-        var seg = mpfEnd
-        while (seg + 4 <= primarySize) {
-            if (jpeg[seg] != FF) return null
-            val marker = jpeg[seg + 1].toInt() and 0xFF
-            if (marker == 0xDA) return null
-            val segEnd = seg + 2 + u16(jpeg, seg + 2)
-            if (segEnd <= seg + 2 || segEnd > primarySize) return null
-            val text = xmpSegmentText(jpeg, seg, segEnd)
-            if (text != null) {
-                val added = mergedAddition(gainMapSize)
-                val at = text.indexOf(added)
-                if (at < 0) return null
+        // 4. The XMP this writer added (dropped), or the photo's own XMP it extended (restored).
+        var xmpBlock: IntRange? = null
+        var restored: ByteArray? = null
+        for (block in xmpBlocks) {
+            val text = xmpText(jpeg, block.first, block.last + 1)
+            if (text == newPrimaryXmp(gainMapSize)) {
+                xmpBlock = block
+                break
+            }
+            val added = mergedAddition(gainMapSize)
+            val at = text.indexOf(added)
+            if (at >= 0) {
                 val rest = text.substring(at + added.length)
                 val original = if (rest.startsWith(DESCRIPTION_END)) {
                     text.substring(0, at) + "/>" + rest.substring(DESCRIPTION_END.length)
                 } else {
                     text.substring(0, at) + ">" + rest
                 }
-                val restored = segment(0xE1, XMP_SIG + original.toByteArray(StandardCharsets.UTF_8))
-                    ?: return null
-                out.write(jpeg, 0, isoStart)
-                out.write(jpeg, mpfEnd, seg - mpfEnd)
-                out.write(restored)
-                out.write(jpeg, segEnd, primarySize - segEnd)
-                out.write(jpeg, afterGainMap, jpeg.size - afterGainMap)
-                return out.toByteArray()
+                restored = segment(0xE1, XMP_SIG + original.toByteArray(StandardCharsets.UTF_8)) ?: return null
+                xmpBlock = block
+                break
             }
-            seg = segEnd
+        }
+        if (xmpBlock == null) return null
+
+        // 5. The header without the three blocks (or with the photo's own XMP put back), then the
+        //    picture, then whatever followed the gain map.
+        val cuts = listOf(isoStart until mpfStart, mpfStart until mpfEnd, xmpBlock).sortedBy { it.first }
+        val out = java.io.ByteArrayOutputStream(jpeg.size - gainMapSize)
+        var at = 0
+        for (cut in cuts) {
+            if (cut.first < at) return null
+            out.write(jpeg, at, cut.first - at)
+            if (cut == xmpBlock && restored != null) out.write(restored)
+            at = cut.last + 1
+        }
+        out.write(jpeg, at, primarySize - at)
+        val afterGainMap = primarySize + gainMapSize
+        out.write(jpeg, afterGainMap, jpeg.size - afterGainMap)
+        return out.toByteArray()
+    }
+
+    /**
+     * True when two JPEGs hold the same picture data: the same compressed image from the first scan
+     * to the end of the main picture. Their headers (EXIF, XMP, the HDR blocks) may differ.
+     */
+    fun samePicture(a: ByteArray, b: ByteArray): Boolean {
+        val (aStart, aEnd) = pictureRange(a) ?: return false
+        val (bStart, bEnd) = pictureRange(b) ?: return false
+        if (aEnd - aStart != bEnd - bStart) return false
+        for (i in 0 until aEnd - aStart) if (a[aStart + i] != b[bStart + i]) return false
+        return true
+    }
+
+    private fun pictureRange(jpeg: ByteArray): Pair<Int, Int>? {
+        if (!isJpeg(jpeg)) return null
+        var pos = 2
+        while (pos + 4 <= jpeg.size) {
+            if (jpeg[pos] != FF) return null
+            val marker = jpeg[pos + 1].toInt() and 0xFF
+            if (marker == 0xDA) {
+                val end = JpegMpfFixer.findJpegImageRange(jpeg, 0)?.second ?: return null
+                return if (end > pos) pos to end else null
+            }
+            val segLen = u16(jpeg, pos + 2)
+            if (segLen < 2) return null
+            pos += 2 + segLen
         }
         return null
     }

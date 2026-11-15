@@ -49,8 +49,11 @@ const val PLAIN_HDR_NOTE = "Already HDR, left as it is."
 data class ConvertOptions(
     val replaceOriginal: Boolean,
     val strength: HdrStrength,
-    /** Attach the gain map to the untouched file instead of saving the picture again. Parked: no switch. */
-    val lossless: Boolean = false,
+    /**
+     * Attach the gain map behind the untouched picture, and only save the picture again when its
+     * layout can't take that. False saves every picture again, as version 1.9 did.
+     */
+    val lossless: Boolean = true,
     /** Take the gain map back out of photos an earlier version added it to, and convert them again. */
     val redo: Boolean = false
 )
@@ -68,7 +71,9 @@ data class Trace(
     val sizeAfter: Long = -1,
     /** What the photo's metadata held when it arrived, and in the finished file: date, camera, gps. */
     val metadataBefore: String = "",
-    val metadataAfter: String = ""
+    val metadataAfter: String = "",
+    /** "kept" when the gain map went behind the untouched picture, "saved again" when it was re-encoded. */
+    val picture: String = ""
 )
 
 data class PhotoResult(
