@@ -22,13 +22,17 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Density
@@ -54,6 +58,10 @@ import com.example.ultrahdr.ui.UiState
 import com.example.ultrahdr.ui.UltraHdrScreen
 import com.example.ultrahdr.ui.theme.UltraHdrTheme
 import com.github.takahirom.roborazzi.captureRoboImage
+import android.view.accessibility.AccessibilityManager
+import androidx.test.core.app.ApplicationProvider
+import org.junit.Assert.assertEquals
+import org.robolectric.Shadows.shadowOf
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -317,6 +325,106 @@ class ScreensTest {
         compose.onNodeWithText("128 selected").assertIsDisplayed()
     }
 
+    /** Just after Clear: the bar is back to Cancel and Convert, and the toast offers Undo. */
+    @Test
+    fun galleryCleared() = galleryScreen("39_gallery_cleared", galleryState(cleared = setOf(3L, 4L, 5L, 6L, 1L))) {
+        compose.onNodeWithText("Select photos").assertIsDisplayed()
+        compose.onNodeWithText("Selection cleared").assertIsDisplayed()
+        compose.onNodeWithText("Undo").assertIsDisplayed().assertHasClickAction()
+        compose.onNodeWithText("Clear").assertDoesNotExist()
+        compose.onNodeWithText("Convert").assertIsNotEnabled()
+    }
+
+    @Test
+    fun galleryClearedDark() = galleryScreen("39_gallery_cleared_dark", galleryState(cleared = setOf(3L, 4L)), dark = true)
+
+    @Test
+    fun galleryClearedHugeText() = galleryScreen("39_gallery_cleared_huge_text", galleryState(cleared = setOf(3L)), dark = true, fontScale = 2f) {
+        compose.onNodeWithText("Selection cleared").assertIsDisplayed()
+        compose.onNodeWithText("Undo").assertIsDisplayed()
+    }
+
+    @Test
+    fun undoInTheToastCallsUndo() {
+        var undone = 0
+        compose.setContent {
+            UltraHdrTheme {
+                GalleryPage(
+                    state = galleryState(cleared = setOf(3L, 4L)),
+                    actions = GalleryActions(undoClear = { undone++ }),
+                    thumbnail = paintedLocal
+                )
+            }
+        }
+        compose.onNodeWithText("Undo").performClick()
+        assertEquals(1, undone)
+    }
+
+    /** Undo is offered for five seconds, and the count waits while a thumb is on it. */
+    @Test
+    fun undoWaitsForAThumbThenTimesOut() {
+        var timeUp = 0
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            UltraHdrTheme {
+                GalleryPage(state = galleryState(cleared = setOf(3L)), actions = GalleryActions(forgetCleared = { timeUp++ }), thumbnail = paintedLocal)
+            }
+        }
+        compose.mainClock.advanceTimeBy(4_000)
+        assertEquals(0, timeUp)
+        compose.onNodeWithText("Undo").performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(8_000)
+        assertEquals(0, timeUp)
+        compose.onNodeWithText("Undo").performTouchInput { cancel() }
+        compose.mainClock.advanceTimeBy(4_000)
+        assertEquals(0, timeUp)
+        compose.mainClock.advanceTimeBy(1_500)
+        assertEquals(1, timeUp)
+    }
+
+    /** With TalkBack on, the toast stays until the user acts, as Android's own snackbars do. */
+    @Test
+    fun undoWaitsForTalkBack() {
+        var timeUp = 0
+        val manager = ApplicationProvider.getApplicationContext<android.content.Context>().getSystemService(AccessibilityManager::class.java)
+        shadowOf(manager).setTouchExplorationEnabled(true)
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            UltraHdrTheme {
+                GalleryPage(state = galleryState(cleared = setOf(3L)), actions = GalleryActions(forgetCleared = { timeUp++ }), thumbnail = paintedLocal)
+            }
+        }
+        compose.mainClock.advanceTimeBy(60_000)
+        assertEquals(0, timeUp)
+        shadowOf(manager).setTouchExplorationEnabled(false)
+    }
+
+    /** A tap on the toast's message must not pick the photo hidden under it, which would also end Undo. */
+    @Test
+    fun tapsOnTheToastStayOnTheToast() {
+        val toggled = mutableListOf<Long>()
+        compose.setContent {
+            UltraHdrTheme {
+                GalleryPage(state = galleryState(cleared = setOf(3L)), actions = GalleryActions(toggle = { toggled += it }), thumbnail = paintedLocal)
+            }
+        }
+        compose.onNodeWithText("Selection cleared").performClick()
+        assertEquals(emptyList<Long>(), toggled)
+    }
+
+    /** The same for the bar: its rim and the gaps between its buttons belong to the bar. */
+    @Test
+    fun tapsOnTheBarsRimStayOnTheBar() {
+        val toggled = mutableListOf<Long>()
+        compose.setContent {
+            UltraHdrTheme {
+                GalleryPage(state = galleryState(selected = setOf(1L)), actions = GalleryActions(toggle = { toggled += it }), thumbnail = paintedLocal)
+            }
+        }
+        compose.onNodeWithText("Cancel").performTouchInput { click(Offset(-2.dp.toPx(), centerY)) }
+        assertEquals(emptyList<Long>(), toggled)
+    }
+
     /** The Galaxy S25 at its default display size, to set beside an Enhance-X screenshot. */
     @Test
     @Config(qualifiers = "w384dp-h832dp-xxhdpi")
@@ -403,7 +511,8 @@ class ScreensTest {
     private fun galleryState(
         selected: Set<Long> = emptySet(),
         album: String? = null,
-        access: PhotoAccess = PhotoAccess.ALL
+        access: PhotoAccess = PhotoAccess.ALL,
+        cleared: Set<Long> = emptySet()
     ): GalleryState {
         val hour = 3_600_000L
         val albums = listOf("Camera", "WhatsApp Images", "Camera", "Screenshots", "Download", "Camera", "WhatsApp Images")
@@ -412,7 +521,7 @@ class ScreensTest {
             val taken = GALLERY_NOW - hour - i * 4L * hour
             LocalPhoto(i.toLong(), uri(i), albums[i % albums.size], taken, taken)
         }
-        return GalleryState(open = true, access = access, photos = photos, album = album, selected = selected)
+        return GalleryState(open = true, access = access, photos = photos, album = album, selected = selected, cleared = cleared)
     }
 
     @Composable

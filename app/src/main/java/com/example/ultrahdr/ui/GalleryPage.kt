@@ -4,16 +4,22 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.util.LruCache
 import android.util.Size
+import android.view.accessibility.AccessibilityManager
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -87,9 +93,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -123,6 +132,9 @@ class GalleryActions(
     val toggle: (Long) -> Unit = {},
     val toggleAll: (List<Long>) -> Unit = {},
     val clearSelection: () -> Unit = {},
+    val undoClear: () -> Unit = {},
+    /** The toast's time is up: the cleared selection can no longer come back. */
+    val forgetCleared: () -> Unit = {},
     val convert: () -> Unit = {},
     val allowAccess: () -> Unit = {},
     val googlePhotos: () -> Unit = {}
@@ -256,14 +268,11 @@ fun GalleryPage(
                 }
             }
 
-            BottomPill(
-                m = m,
-                look = look,
-                backdrop = backdrop,
-                count = count,
-                actions = actions,
-                modifier = Modifier.align(Alignment.BottomCenter)
-            )
+            // The toast sits on top of the bar, so the bar never moves when it comes and goes.
+            Column(Modifier.align(Alignment.BottomCenter), horizontalAlignment = Alignment.CenterHorizontally) {
+                ClearedToast(m, look, visible = state.cleared.isNotEmpty(), onUndo = actions.undoClear, onTimeUp = actions.forgetCleared)
+                BottomPill(m = m, look = look, backdrop = backdrop, count = count, actions = actions, modifier = Modifier)
+            }
         }
     }
 }
@@ -297,7 +306,11 @@ private class Look(
     val pillOff: Color,
     val dim: Color,
     /** A white bar needs a soft shadow, or it disappears over a white photo. */
-    val pillShadow: Boolean
+    val pillShadow: Boolean,
+    /** One UI's toast: the screen's own fill, its text colour, and in dark a hairline edge. */
+    val toast: Color,
+    val toastText: Color,
+    val toastLine: Color
 )
 
 /** Enhance-X's thumbnail selection colour. */
@@ -325,7 +338,10 @@ private fun rememberLook(): Look {
                 pillOn = Color(0xFFFCFCFF),
                 pillOff = Color(0xFFCCCCCE),
                 dim = Color.White.copy(alpha = 0.72f),
-                pillShadow = false
+                pillShadow = false,
+                toast = Color(0xFF010102),
+                toastText = Color.White,
+                toastLine = Color.White.copy(alpha = 0.16f)
             )
         } else {
             Look(
@@ -344,7 +360,10 @@ private fun rememberLook(): Look {
                 pillOn = Color(0xFF0A0A0C),
                 pillOff = Color(0xFF4A4A4E),
                 dim = Color.Black.copy(alpha = 0.6f),
-                pillShadow = true
+                pillShadow = true,
+                toast = Color(0xFFF1F1F3),
+                toastText = Color(0xFF0A0A0C),
+                toastLine = Color.Transparent
             )
         }
     }
@@ -566,7 +585,8 @@ private fun SomeAccessRow(m: Metrics, look: Look, onAllow: () -> Unit) {
 
 /**
  * Enhance-X's floating bar. Convert is its one button, and turns violet with the count once photos
- * are picked. Clear joins the bar only then, because before that there is nothing to clear.
+ * are picked. Clear joins the bar only then, because before that there is nothing to clear, and a
+ * toast above the bar can undo it.
  */
 @Composable
 private fun BottomPill(m: Metrics, look: Look, backdrop: GlassBackdrop, count: Int, actions: GalleryActions, modifier: Modifier) {
@@ -578,17 +598,7 @@ private fun BottomPill(m: Metrics, look: Look, backdrop: GlassBackdrop, count: I
             shape = RoundedCornerShape(m(30f)),
             tint = look.pill,
             blurRadius = 14.dp,
-            modifier = Modifier
-                .heightIn(min = m(56f))
-                .then(
-                    if (look.pillShadow) Modifier.shadow(
-                        elevation = 12.dp,
-                        shape = RoundedCornerShape(m(30f)),
-                        clip = false,
-                        ambientColor = Color.Black.copy(alpha = 0.10f),
-                        spotColor = Color.Black.copy(alpha = 0.18f)
-                    ) else Modifier
-                )
+            modifier = Modifier.heightIn(min = m(56f)).floatShadow(look, RoundedCornerShape(m(30f))).keepTouches()
         ) {
             Row(Modifier.padding(m(4f)), verticalAlignment = Alignment.CenterVertically) {
                 BarItem(m, look, Icons.Outlined.Close, "Cancel", onClick = actions.close)
@@ -612,6 +622,88 @@ private fun BottomPill(m: Metrics, look: Look, backdrop: GlassBackdrop, count: I
                                 .padding(start = m(BAR_GAP))
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+/** A white surface needs a soft shadow, or it disappears over a white photo. Dark ones go without. */
+private fun Modifier.floatShadow(look: Look, shape: Shape): Modifier =
+    if (!look.pillShadow) this else shadow(
+        elevation = 12.dp,
+        shape = shape,
+        clip = false,
+        ambientColor = Color.Black.copy(alpha = 0.10f),
+        spotColor = Color.Black.copy(alpha = 0.18f)
+    )
+
+/** Touches that land on a floating surface stay there, instead of picking the photo underneath. */
+private fun Modifier.keepTouches(): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope { while (true) awaitPointerEvent() }
+}
+
+/**
+ * One UI's toast, as the kit draws it: a pill on the screen's own fill with an inverted action.
+ * It says what Clear did and offers Undo, floating just above the bar.
+ */
+@Composable
+private fun ClearedToast(m: Metrics, look: Look, visible: Boolean, onUndo: () -> Unit, onTimeUp: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
+    val held by press.collectIsPressedAsState()
+    val context = LocalContext.current
+    val a11y = LocalAccessibilityManager.current
+    // Five seconds, or longer when Android's accessibility settings ask for more time to act. The
+    // count waits while a thumb is on Undo. With TalkBack on, the toast waits for the user, as
+    // Android's own snackbars with an action do.
+    LaunchedEffect(visible, held) {
+        if (!visible || held) return@LaunchedEffect
+        if (context.getSystemService(AccessibilityManager::class.java)?.isTouchExplorationEnabled == true) return@LaunchedEffect
+        delay(a11y?.calculateRecommendedTimeoutMillis(5_000, containsIcons = false, containsText = true, containsControls = true) ?: 5_000)
+        onTimeUp()
+    }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(200, easing = OneUiEasing)) + slideInVertically(tween(240, easing = OneUiEasing)) { it / 3 },
+        exit = fadeOut(tween(160, easing = OneUiEasing))
+    ) {
+        val shape = RoundedCornerShape(m(24f))
+        Row(
+            modifier = Modifier
+                .padding(start = m(16f), end = m(16f), bottom = m(10f))
+                .keepTouches()
+                .floatShadow(look, shape)
+                .clip(shape)
+                .background(look.toast)
+                .border(0.5.dp, look.toastLine, shape)
+                .semantics { liveRegion = LiveRegionMode.Polite }
+                .padding(start = m(20f), end = m(10f)),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Selection cleared",
+                style = m.text(14f),
+                color = look.toastText,
+                modifier = Modifier.weight(1f, fill = false).padding(vertical = m(10f))
+            )
+            Spacer(Modifier.width(m(10f)))
+            // The kit's 28 dp pill, inside a 48 dp target that reaches the toast's top and bottom.
+            Box(
+                modifier = Modifier
+                    .heightIn(min = m(48f))
+                    .clickable(press, indication = null, role = Role.Button, onClick = onUndo),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .heightIn(min = m(28f))
+                        .clip(RoundedCornerShape(m(14f)))
+                        .background(look.toastText)
+                        .indication(press, ripple(color = look.toast))
+                        .padding(horizontal = m(20f), vertical = m(4f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Undo", style = m.text(14f, FontWeight.SemiBold), color = look.toast, maxLines = 1)
                 }
             }
         }

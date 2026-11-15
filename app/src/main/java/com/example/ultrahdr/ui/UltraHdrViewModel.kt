@@ -77,7 +77,9 @@ data class GalleryState(
     /** The album tab shown. Null is "All". */
     val album: String? = null,
     /** Picked photo ids, in the order they were tapped. */
-    val selected: Set<Long> = emptySet()
+    val selected: Set<Long> = emptySet(),
+    /** What Clear just took away, kept while its toast offers Undo. Empty the rest of the time. */
+    val cleared: Set<Long> = emptySet()
 )
 
 sealed class UiEvent {
@@ -208,7 +210,7 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun closeGallery() {
-        _gallery.update { it.copy(open = false, selected = emptySet()) }
+        _gallery.update { it.copy(open = false, selected = emptySet(), cleared = emptySet()) }
     }
 
     /** Reads the library again: on opening, on coming back to the app, and after the access dialog. */
@@ -225,7 +227,8 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
                     access = access,
                     photos = photos,
                     album = g.album?.takeIf { album -> photos.any { it.album == album } },
-                    selected = g.selected.filterTo(LinkedHashSet()) { it in ids }
+                    selected = g.selected.filterTo(LinkedHashSet()) { it in ids },
+                    cleared = g.cleared.filterTo(LinkedHashSet()) { it in ids }
                 )
             }
         }
@@ -233,16 +236,27 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
 
     fun chooseAlbum(album: String?) = _gallery.update { it.copy(album = album) }
 
+    // Picking again ends the chance to undo a Clear, so Undo never overwrites the new picks.
     fun togglePhoto(id: Long) = _gallery.update {
-        it.copy(selected = if (id in it.selected) it.selected - id else it.selected + id)
+        it.copy(selected = if (id in it.selected) it.selected - id else it.selected + id, cleared = emptySet())
     }
 
     /** The round button by the tabs: picks every photo in the tab, or clears them when all are picked. */
     fun toggleAll(ids: List<Long>) = _gallery.update {
-        it.copy(selected = if (it.selected.containsAll(ids)) it.selected - ids.toSet() else it.selected + ids)
+        it.copy(selected = if (it.selected.containsAll(ids)) it.selected - ids.toSet() else it.selected + ids, cleared = emptySet())
     }
 
-    fun clearSelection() = _gallery.update { it.copy(selected = emptySet()) }
+    /** Empties the selection, and keeps it for a few seconds so the toast's Undo can bring it back. */
+    fun clearSelection() = _gallery.update {
+        if (it.selected.isEmpty()) it else it.copy(selected = emptySet(), cleared = it.selected)
+    }
+
+    fun undoClear() = _gallery.update {
+        if (it.cleared.isEmpty()) it else it.copy(selected = it.cleared, cleared = emptySet())
+    }
+
+    /** The toast has gone, and the cleared selection with it. */
+    fun forgetCleared() = _gallery.update { if (it.cleared.isEmpty()) it else it.copy(cleared = emptySet()) }
 
     /** Converts the picked photos the same way as picked or shared ones. */
     fun convertSelected() {

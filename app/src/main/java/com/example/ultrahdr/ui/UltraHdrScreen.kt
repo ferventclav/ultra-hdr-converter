@@ -161,6 +161,8 @@ fun UltraHdrApp(viewModel: UltraHdrViewModel) {
             toggle = viewModel::togglePhoto,
             toggleAll = viewModel::toggleAll,
             clearSelection = viewModel::clearSelection,
+            undoClear = viewModel::undoClear,
+            forgetCleared = viewModel::forgetCleared,
             convert = viewModel::convertSelected,
             allowAccess = viewModel::allowPhotoAccess,
             googlePhotos = {
