@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.util.LruCache
 import android.util.Size
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -17,7 +18,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -76,6 +76,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
@@ -555,9 +556,14 @@ private fun SomeAccessRow(m: Metrics, look: Look, onAllow: () -> Unit) {
     }
 }
 
-/** Enhance-X's floating bar: 232 by 56, three items, the middle one on a lighter pill. */
+/**
+ * Enhance-X's floating bar. Convert is its one button, and turns violet with the count once photos
+ * are picked. Clear joins the bar only then, because before that there is nothing to clear.
+ */
 @Composable
 private fun BottomPill(m: Metrics, look: Look, backdrop: GlassBackdrop, count: Int, actions: GalleryActions, modifier: Modifier) {
+    // 0 with nothing picked, 1 once something is. Clear's slot opens with it, so the bar grows smoothly.
+    val open by animateFloatAsState(if (count > 0) 1f else 0f, tween(240, easing = OneUiEasing), label = "bar")
     Box(modifier.navigationBarsPadding().padding(bottom = m(10f))) {
         GlassSurface(
             backdrop = backdrop,
@@ -565,7 +571,6 @@ private fun BottomPill(m: Metrics, look: Look, backdrop: GlassBackdrop, count: I
             tint = look.pill,
             blurRadius = 14.dp,
             modifier = Modifier
-                .width(m(232f))
                 .height(m(56f))
                 .then(
                     if (look.pillShadow) Modifier.shadow(
@@ -577,69 +582,99 @@ private fun BottomPill(m: Metrics, look: Look, backdrop: GlassBackdrop, count: I
                     ) else Modifier
                 )
         ) {
-            Row(Modifier.fillMaxSize().padding(horizontal = m(8f)), verticalAlignment = Alignment.CenterVertically) {
-                PillItem(m, look, Icons.Outlined.Close, "Cancel", highlighted = false, enabled = true, onClick = actions.close)
-                PillItem(
-                    m, look, Icons.Outlined.HdrOn,
-                    label = if (count == 0) "Convert" else "Convert $count",
-                    highlighted = true,
-                    enabled = count > 0,
-                    onClick = actions.convert
-                )
-                PillItem(m, look, Icons.Outlined.Deselect, "Clear", highlighted = false, enabled = count > 0, onClick = actions.clearSelection)
+            Row(Modifier.fillMaxHeight().padding(horizontal = m(4f)), verticalAlignment = Alignment.CenterVertically) {
+                BarItem(m, look, Icons.Outlined.Close, "Cancel", onClick = actions.close)
+                ConvertButton(m, look, count, onClick = actions.convert)
+                if (open > 0f) {
+                    Box(
+                        Modifier
+                            .width(m(BAR_ITEM) * open)
+                            .fillMaxHeight()
+                            .clipToBounds()
+                            .graphicsLayer { alpha = open },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        BarItem(
+                            m, look, Icons.Outlined.Deselect, "Clear",
+                            onClick = actions.clearSelection,
+                            enabled = count > 0,
+                            modifier = Modifier.requiredWidth(m(BAR_ITEM))
+                        )
+                    }
+                }
             }
         }
     }
 }
 
+/** Width of Cancel and Clear, a third of Enhance-X's 232 dp bar after its padding. */
+private const val BAR_ITEM = 72f
+
+/** The bar's button: an icon and a label side by side, larger than the items around it. */
 @Composable
-private fun RowScope.PillItem(
+private fun ConvertButton(m: Metrics, look: Look, count: Int, onClick: () -> Unit) {
+    val ready = count > 0
+    val fill by animateColorAsState(
+        if (ready) PickedColor else look.pillPicked,
+        tween(200, easing = OneUiEasing),
+        label = "convert"
+    )
+    val color = if (ready) Color.White else look.pillOn
+    Row(
+        modifier = Modifier
+            .height(m(48f))
+            .widthIn(min = m(112f), max = m(196f))
+            .clip(RoundedCornerShape(m(24f)))
+            .background(fill)
+            .clickable(enabled = ready, role = Role.Button, onClick = onClick)
+            // The count changes the label's width; the button eases to it instead of jumping.
+            .animateContentSize(tween(200, easing = OneUiEasing))
+            .padding(horizontal = m(18f))
+            .alpha(if (ready) 1f else 0.5f),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Outlined.HdrOn, contentDescription = null, tint = color, modifier = Modifier.size(m(22f)))
+        Spacer(Modifier.width(m(6f)))
+        Text(
+            text = if (ready) "Convert $count" else "Convert",
+            style = m.text(15f, FontWeight.Bold),
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/** Cancel and Clear: an icon over a small label, as in Enhance-X's bar. */
+@Composable
+private fun BarItem(
     m: Metrics,
     look: Look,
     icon: ImageVector,
     label: String,
-    highlighted: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
 ) {
-    // The middle item turns violet once there is something to convert, so it reads as the action.
-    val active = highlighted && enabled
-    val fill by animateColorAsState(
-        when {
-            active -> PickedColor
-            highlighted -> look.pillPicked
-            else -> Color.Transparent
-        },
-        tween(200, easing = OneUiEasing),
-        label = "pill"
-    )
-    val color = when {
-        active -> Color.White
-        highlighted -> look.pillOn
-        else -> look.pillOff
-    }
-    Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-        Box(
-            modifier = Modifier
-                .requiredWidth(m(80f))
-                .height(m(48f))
-                .clip(RoundedCornerShape(m(24f)))
-                .background(fill)
-                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-                .alpha(if (enabled) 1f else 0.5f),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(m(24f)))
-                Spacer(Modifier.height(m(2f)))
-                Text(
-                    text = label,
-                    style = m.text(10f, if (highlighted) FontWeight.Bold else FontWeight.Normal),
-                    color = color,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+    Box(
+        modifier = modifier
+            .width(m(BAR_ITEM))
+            .height(m(48f))
+            .clip(RoundedCornerShape(m(24f)))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, contentDescription = null, tint = look.pillOff, modifier = Modifier.size(m(24f)))
+            Spacer(Modifier.height(m(2f)))
+            Text(
+                text = label,
+                style = m.text(10f),
+                color = look.pillOff,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

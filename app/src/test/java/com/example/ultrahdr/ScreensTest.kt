@@ -23,6 +23,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -270,7 +272,9 @@ class ScreensTest {
         compose.onNodeWithText("Select photos").assertIsDisplayed()
         compose.onNodeWithText("All").assertIsDisplayed()
         compose.onNodeWithText("Camera").assertIsDisplayed()
-        compose.onNodeWithText("Convert").assertIsDisplayed()
+        compose.onNodeWithText("Convert").assertIsDisplayed().assertIsNotEnabled()
+        // Nothing to clear yet, so Clear is not in the bar.
+        compose.onNodeWithText("Clear").assertDoesNotExist()
     }
 
     @Test
@@ -279,7 +283,8 @@ class ScreensTest {
     @Test
     fun galleryPicked() = galleryScreen("31_gallery_picked", galleryState(selected = setOf(3L, 4L, 5L, 6L, 1L))) {
         compose.onNodeWithText("5 selected").assertIsDisplayed()
-        compose.onNodeWithText("Convert 5").assertIsDisplayed()
+        compose.onNodeWithText("Convert 5").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithText("Clear").assertIsDisplayed().assertIsEnabled()
     }
 
     @Test
