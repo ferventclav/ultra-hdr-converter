@@ -32,6 +32,11 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -279,6 +284,12 @@ class ScreensTest {
         )
     ) {
         compose.onNodeWithText("This photo couldn't be converted").assertIsDisplayed()
+        compose.onNodeWithText("Your photo was not changed.").assertIsDisplayed()
+        // TalkBack hears the heading when it changes, not only when someone touches it.
+        compose.onNode(
+            SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion) and
+                hasAnyDescendant(hasText("This photo couldn't be converted"))
+        ).assertExists()
     }
 
     @Test
@@ -405,6 +416,7 @@ class ScreensTest {
         compose.onNodeWithText("All").assertIsDisplayed()
         compose.onNodeWithText("Camera").assertIsDisplayed()
         compose.onNodeWithText("Convert").assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Select all in this tab").assertIsOff()
         // Nothing to clear yet, so Clear is not in the bar.
         compose.onNodeWithText("Clear").assertDoesNotExist()
         // The HDR label is part of what TalkBack says for its tile.

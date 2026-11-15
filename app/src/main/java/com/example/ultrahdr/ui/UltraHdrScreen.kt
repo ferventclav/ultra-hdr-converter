@@ -292,7 +292,7 @@ internal fun headingFor(state: UiState): Heading {
             val info = when (summary.tone) {
                 Tone.SUCCESS -> "Tap a photo to open it in Gallery."
                 Tone.INFO -> "Photos that are HDR already, or have nothing bright to boost, stay as they are."
-                Tone.ERROR -> "Your photos were not changed."
+                Tone.ERROR -> if (count == 1) "Your photo was not changed." else "Your photos were not changed."
             }
             Heading(summary.title, info)
         }
@@ -405,7 +405,9 @@ private fun ExpandedHeader(words: Heading, height: Dp, screenWidth: Dp, undo: ((
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = height)
-            .padding(start = 12.dp, end = 12.dp, top = TOP_BAR_HEIGHT, bottom = 30.dp),
+            .padding(start = 12.dp, end = 12.dp, top = TOP_BAR_HEIGHT, bottom = 30.dp)
+            // TalkBack reads the new heading out when it changes: getting ready, each photo, done.
+            .semantics { liveRegion = LiveRegionMode.Polite },
         verticalArrangement = Arrangement.Bottom,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {

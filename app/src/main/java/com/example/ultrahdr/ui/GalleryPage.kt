@@ -464,7 +464,9 @@ private fun TabRow(
             modifier = Modifier
                 .size(m(48f))
                 .clip(CircleShape)
-                .clickable(onClickLabel = if (allPicked) "Clear this tab" else "Select all in this tab", onClick = onPickAll),
+                // TalkBack: "Select all in this tab, checkbox, not checked".
+                .toggleable(value = allPicked, role = Role.Checkbox, onValueChange = { onPickAll() })
+                .semantics { contentDescription = "Select all in this tab" },
             contentAlignment = Alignment.Center
         ) {
             Box(

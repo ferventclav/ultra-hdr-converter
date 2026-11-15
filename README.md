@@ -76,7 +76,7 @@ app/src/main/java/com/example/ultrahdr/
   ConversionService.kt         keeps a batch running in the background, with its notification
   processing/
     BatchConverter.kt          one photo at a time: HDR check, where it may go, convert, save
-    SaveDecision.kt            in place, copy or leave alone, and the Copy report text
+    SaveDecision.kt            in place, copy or leave alone
     LocalPhotos.kt             the JPEGs on the phone for the grid, albums, HDR label check
     PhotoNames.kt              readable names for photos that arrive with cache names
     GainMapSynth.kt            which parts get brighter, and by how much
@@ -91,7 +91,7 @@ app/src/main/java/com/example/ultrahdr/
     Models.kt                  photo, outcome and result types
   ui/
     ConversionSession.kt       the batch, shared by every screen so it outlives them
-    UltraHdrViewModel.kt       queue, background checks, conversion, Undo, Copy report
+    UltraHdrViewModel.kt       queue, background checks, conversion, Undo
     UltraHdrScreen.kt          the main screen: empty state, photo grid, results
     GalleryPage.kt             the photo picker, laid out like Galaxy Enhance-X's home screen
     Components.kt, Glass.kt    One UI buttons, rows, tiles, glass toolbar and dialogs
@@ -117,7 +117,7 @@ The tests run on a PC through Robolectric, with Android's real picture decoder:
 
 - `GainMapSynthTest`, `V19ParityTest`: the gain map
 - `ConversionRulesTest`: where each kind of photo goes, keeping the picture, dates, HDR detection,
-  GPS, Undo, the Copy report
+  GPS, Undo
 - `UltraHdrContainerTest`: reading JPEG layouts and refusing odd files
 - `ScreensTest`: every screen at phone, tablet, sideways and large-text sizes, light and dark
 - `ResultSummaryTest`, `LogicTest`: wording, MPF and detection checks
