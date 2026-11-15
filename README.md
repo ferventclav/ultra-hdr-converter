@@ -107,7 +107,8 @@ There is no Gradle wrapper script. You need JDK 17, Gradle 8.9 and the Android S
 Point `ANDROID_HOME` at the SDK, or set `sdk.dir` in `local.properties`, then:
 
 ```powershell
-gradle assembleDebug                      # app\build\outputs\apk\debug\app-debug.apk
+gradle assembleRelease                    # app\build\outputs\apk\release\app-release.apk, the one to install
+gradle assembleDebug                      # app\build\outputs\apk\debug\app-debug.apk, for debugging only
 gradle testDebugUnitTest                  # all tests
 gradle testDebugUnitTest -Pscreenshots    # also saves every screen as a PNG in app\build\screens
 ```

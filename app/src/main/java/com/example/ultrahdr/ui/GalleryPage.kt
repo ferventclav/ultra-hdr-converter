@@ -63,17 +63,21 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -98,6 +102,7 @@ import com.example.ultrahdr.processing.LocalPhotos
 import com.example.ultrahdr.processing.PhotoAccess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
@@ -142,6 +147,15 @@ fun GalleryPage(
         val grid = rememberLazyGridState()
         LaunchedEffect(state.album) { grid.scrollToItem(0) }
         val count = state.selected.size
+        // Circles fade in once picking has started, as in Samsung's own selection mode. One fade
+        // for the whole grid, read while drawing, so tiles don't each run and recompose their own.
+        val circles = animateFloatAsState(if (count > 0) 1f else 0f, tween(180, easing = OneUiEasing), label = "circles")
+        val circlesShown by remember { derivedStateOf { circles.value > 0f } }
+        // The grid's own column sum, so thumbnails are loaded at the size they are shown.
+        val gap = m(2f)
+        val room = maxWidth - m(20f)
+        val columns = maxOf(1, ((room + gap) / (m(104f) + gap)).toInt())
+        val tile = (room - gap * (columns - 1)) / columns
 
         Box(
             Modifier
@@ -159,32 +173,35 @@ fun GalleryPage(
                     .clip(RoundedCornerShape(topStart = m(26f), topEnd = m(26f)))
                     .background(look.sheet)
             ) {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = m(104f)),
-                    state = grid,
-                    modifier = Modifier.fillMaxSize().glassSource(backdrop),
-                    contentPadding = PaddingValues(
-                        start = m(10f),
-                        end = m(10f),
-                        top = m(96f),
-                        bottom = navBottom + m(56f + 10f + 24f)
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(m(2f)),
-                    verticalArrangement = Arrangement.spacedBy(m(2f))
-                ) {
-                    if (state.access == PhotoAccess.SOME) {
-                        item(key = "some", span = { GridItemSpan(maxLineSpan) }) { SomeAccessRow(m, look, actions.allowAccess) }
-                    }
-                    items(shown, key = { it.id }, contentType = { "photo" }) { photo ->
-                        GalleryTile(
-                            photo = photo,
-                            picked = photo.id in state.selected,
-                            selecting = count > 0,
-                            m = m,
-                            look = look,
-                            onClick = { actions.toggle(photo.id) },
-                            thumbnail = thumbnail
-                        )
+                CompositionLocalProvider(LocalThumbSize provides tile) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = m(104f)),
+                        state = grid,
+                        modifier = Modifier.fillMaxSize().glassSource(backdrop),
+                        contentPadding = PaddingValues(
+                            start = m(10f),
+                            end = m(10f),
+                            top = m(96f),
+                            bottom = navBottom + m(56f + 10f + 24f)
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(m(2f)),
+                        verticalArrangement = Arrangement.spacedBy(m(2f))
+                    ) {
+                        if (state.access == PhotoAccess.SOME) {
+                            item(key = "some", span = { GridItemSpan(maxLineSpan) }) { SomeAccessRow(m, look, actions.allowAccess) }
+                        }
+                        items(shown, key = { it.id }, contentType = { "photo" }) { photo ->
+                            GalleryTile(
+                                photo = photo,
+                                picked = photo.id in state.selected,
+                                showCircles = circlesShown,
+                                circles = { circles.value },
+                                m = m,
+                                look = look,
+                                onClick = { actions.toggle(photo.id) },
+                                thumbnail = thumbnail
+                            )
+                        }
                     }
                 }
 
@@ -466,29 +483,31 @@ private fun AlbumTab(m: Metrics, look: Look, label: String, chosen: Boolean, onC
 private fun GalleryTile(
     photo: LocalPhoto,
     picked: Boolean,
-    selecting: Boolean,
+    showCircles: Boolean,
+    circles: () -> Float,
     m: Metrics,
     look: Look,
     onClick: () -> Unit,
     thumbnail: @Composable (LocalPhoto, Modifier) -> Unit
 ) {
-    val name = remember(photo.takenAt) {
-        "Photo, " + DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(photo.takenAt))
-    }
-    // Circles fade in once picking has started, as in Samsung's own selection mode.
-    val circles by animateFloatAsState(if (selecting) 1f else 0f, tween(180, easing = OneUiEasing), label = "circles")
     Box(
         Modifier
             .aspectRatio(1f)
             .background(look.placeholder)
             .toggleable(value = picked, role = Role.Checkbox, onValueChange = { onClick() })
-            .semantics { contentDescription = name }
+            // Worked out only when something reads it, such as TalkBack, not for every tile shown.
+            .semantics { contentDescription = "Photo, " + TileDate.format(Date(photo.takenAt)) }
     ) {
         thumbnail(photo, Modifier.fillMaxSize())
         if (picked) Box(Modifier.fillMaxSize().border(m(3f), PickedColor))
-        if (circles > 0f) PickCircle(picked, m, Modifier.align(Alignment.TopStart).padding(m(8f)).alpha(circles))
+        if (showCircles) {
+            PickCircle(picked, m, Modifier.align(Alignment.TopStart).padding(m(8f)).graphicsLayer { alpha = circles() })
+        }
     }
 }
+
+/** One formatter for every tile's spoken label. Only used on the main thread. */
+private val TileDate: DateFormat by lazy { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT) }
 
 /** The selection circle: an empty white ring, or Enhance-X's violet with a tick. */
 @Composable
@@ -629,17 +648,24 @@ private fun RowScope.PillItem(
 // Thumbnails
 // ----------------------------------------------------------------------------------------------
 
+/** How big a grid tile is on screen, so its thumbnail is loaded no bigger than that. */
+private val LocalThumbSize = staticCompositionLocalOf { 160.dp }
+
 /** The phone's own cached thumbnail, with an HDR label when the photo is HDR already. */
 @Composable
 fun GalleryThumb(photo: LocalPhoto, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val px = with(LocalDensity.current) { 160.dp.roundToPx() }
+    val px = with(LocalDensity.current) { LocalThumbSize.current.roundToPx() }
     val key = Thumbs.key(photo)
     val bitmap by produceState(Thumbs.bitmap(key), key) {
         if (value == null) value = withContext(Thumbs.io) { Thumbs.load(context, photo, px) }
     }
     val hdr by produceState(Thumbs.hdr(key), key) {
-        if (value == null) value = withContext(Thumbs.io) { Thumbs.checkHdr(context, photo) }
+        if (value == null) {
+            // A tile that only flies past in a fling is gone before this, so its file is never read.
+            delay(Thumbs.LABEL_WAIT_MS)
+            value = withContext(Thumbs.labelIo) { Thumbs.checkHdr(context, photo) }
+        }
     }
     Box(modifier) {
         bitmap?.let { shown ->
@@ -650,24 +676,53 @@ fun GalleryThumb(photo: LocalPhoto, modifier: Modifier = Modifier) {
     }
 }
 
-/** Kept for the life of the app, keyed by photo and last change, so a converted photo is read again. */
+/** Kept for the life of the app, keyed by photo, last change and size, so a converted photo is read again. */
 private object Thumbs {
     @OptIn(ExperimentalCoroutinesApi::class)
     val io = Dispatchers.IO.limitedParallelism(4)
+
+    /** HDR labels have their own two lanes, so checking them never holds up a thumbnail. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val labelIo = Dispatchers.IO.limitedParallelism(2)
+
+    const val LABEL_WAIT_MS = 200L
 
     private val bitmaps = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 8).toInt()) {
         override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
     }
     private val hdrFlags = ConcurrentHashMap<String, Boolean>()
 
-    fun key(photo: LocalPhoto) = "${photo.id}:${photo.modified}"
+    fun key(photo: LocalPhoto) = "${photo.id}:${photo.modified}:${photo.size}"
     fun bitmap(key: String): Bitmap? = bitmaps.get(key)
     fun hdr(key: String): Boolean? = hdrFlags[key]
 
     fun load(context: Context, photo: LocalPhoto, px: Int): Bitmap? =
         runCatching { context.contentResolver.loadThumbnail(photo.uri, Size(px, px), null) }
             .getOrNull()
-            ?.also { bitmaps.put(key(photo), it) }
+            ?.let { fit(it, px) }
+            ?.also {
+                // Sends it to the graphics chip now, so the first frame that shows it doesn't wait.
+                it.prepareToDraw()
+                bitmaps.put(key(photo), it)
+            }
+
+    /**
+     * Android hands back its own cached size, often well over the tile's. Scaled here, so less
+     * goes to the graphics chip while scrolling and more thumbnails fit in the cache.
+     */
+    private fun fit(bitmap: Bitmap, px: Int): Bitmap {
+        val short = minOf(bitmap.width, bitmap.height)
+        if (px <= 0 || short <= px * 5 / 4) return bitmap
+        val scale = px.toFloat() / short
+        val scaled = Bitmap.createScaledBitmap(
+            bitmap,
+            maxOf(1, (bitmap.width * scale).toInt()),
+            maxOf(1, (bitmap.height * scale).toInt()),
+            true
+        )
+        if (scaled !== bitmap) bitmap.recycle()
+        return scaled
+    }
 
     fun checkHdr(context: Context, photo: LocalPhoto): Boolean =
         LocalPhotos.looksHdr(context, photo.uri).also { hdrFlags[key(photo)] = it }

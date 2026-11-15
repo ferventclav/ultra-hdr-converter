@@ -21,6 +21,49 @@ class LogicTest {
     @get:Rule
     val tempFolder = TemporaryFolder()
 
+    /** The search as it was written before, over text. The byte search must answer the same. */
+    private fun labelsAsText(header: ByteArray, length: Int = header.size): Boolean {
+        val size = minOf(length, header.size)
+        val content = String(header, 0, size, Charsets.ISO_8859_1)
+        val isHeif = size >= 12 && content.startsWith("ftyp", startIndex = 4)
+        if (isHeif && (content.contains("tmap") || content.contains("hdrgainmap"))) return true
+        return content.contains("urn:iso:std:iso:ts:21496:-1") ||
+            content.contains("Item:Semantic=\"GainMap\"") ||
+            content.contains("http://ns.google.com/photos/1.0/gainmap/") ||
+            content.contains("xmlns:hdrgm=\"http://ns.google.com/photos/1.0/gainmap/\"") ||
+            content.contains("http://ns.adobe.com/hdr-gain-map/1.0/") ||
+            content.contains("hdrgm:Version") ||
+            content.contains("hdrgm:GainMapMin") ||
+            content.contains("hdrgm:GainMapMax")
+    }
+
+    @Test
+    fun theByteSearchFindsExactlyWhatTheTextSearchFound() {
+        val words = listOf(
+            "urn:iso:std:iso:ts:21496:-1", "Item:Semantic=\"GainMap\"",
+            "http://ns.google.com/photos/1.0/gainmap/", "xmlns:hdrgm=\"http://ns.google.com/photos/1.0/gainmap/\"",
+            "http://ns.adobe.com/hdr-gain-map/1.0/", "hdrgm:Version", "hdrgm:GainMapMin", "hdrgm:GainMapMax",
+            "tmap", "hdrgainmap",
+            // Near misses: one letter short or different.
+            "hdrgm:Versio", "hdrgm:GainMapMid", "urn:iso:std:iso:ts:21496:-2", "http://ns.google.com/photos/1.0/gainma"
+        )
+        val random = java.util.Random(7)
+        var checked = 0
+        for (heif in listOf(false, true)) for (word in words) for (at in listOf(0, 13, 500, 1000 - word.length, 990)) {
+            val bytes = ByteArray(1000).also { random.nextBytes(it) }
+            if (heif) "\u0000\u0000\u0000\u0018ftypheic".toByteArray(Charsets.ISO_8859_1).copyInto(bytes)
+            val start = maxOf(if (heif) 12 else 0, at)
+            word.toByteArray(Charsets.ISO_8859_1).let { w -> w.copyInto(bytes, start, 0, minOf(w.size, bytes.size - start)) }
+            // The whole array, a cut that ends inside the word, and one that ends right after it.
+            for (length in listOf(bytes.size, start + word.length - 1, start + word.length)) {
+                assertEquals("$word at $start, length $length", labelsAsText(bytes, length), ImageExifHelper.looksLikeUltraHdr(bytes, length))
+                checked++
+            }
+        }
+        assertTrue(checked > 400)
+        assertFalse(ImageExifHelper.looksLikeUltraHdr(ByteArray(0)))
+    }
+
     @Test
     fun testUltraHdrDetectionOnIso21496Marker() {
         val testFile = tempFolder.newFile("test_iso21496.jpg")

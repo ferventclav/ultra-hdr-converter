@@ -81,18 +81,51 @@ object ImageExifHelper {
      */
     fun looksLikeUltraHdr(header: ByteArray, length: Int = header.size): Boolean {
         val size = minOf(length, header.size)
-        val content = String(header, 0, size, Charsets.ISO_8859_1)
         // HEIC and AVIF keep their gain map as a "tone map" item, or as Apple's own auxiliary image.
-        val isHeif = size >= 12 && content.startsWith("ftyp", startIndex = 4)
-        if (isHeif && (content.contains("tmap") || content.contains("hdrgainmap"))) return true
-        return content.contains("urn:iso:std:iso:ts:21496:-1") ||
-            content.contains("Item:Semantic=\"GainMap\"") ||
-            content.contains("http://ns.google.com/photos/1.0/gainmap/") ||
-            content.contains("xmlns:hdrgm=\"http://ns.google.com/photos/1.0/gainmap/\"") ||
-            content.contains("http://ns.adobe.com/hdr-gain-map/1.0/") ||
-            content.contains("hdrgm:Version") ||
-            content.contains("hdrgm:GainMapMin") ||
-            content.contains("hdrgm:GainMapMax")
+        val isHeif = size >= 12 && HdrLabels.FTYP.at(header, 4)
+        if (isHeif && HdrLabels.HEIF.foundIn(header, size)) return true
+        return HdrLabels.JPEG.foundIn(header, size)
+    }
+
+    /**
+     * Words searched for as bytes, so a file is never copied into text first. The photo grid runs
+     * this on every photo it shows, and the copies made scrolling stutter.
+     */
+    private class HdrLabels(vararg words: String) {
+        private val patterns = words.map { it.toByteArray(Charsets.ISO_8859_1) }
+        private val starts = BooleanArray(256).also { s -> patterns.forEach { s[it[0].toInt() and 0xFF] = true } }
+
+        fun at(bytes: ByteArray, index: Int): Boolean = patterns.any { matches(bytes, index, it, bytes.size) }
+
+        fun foundIn(bytes: ByteArray, size: Int): Boolean {
+            for (i in 0 until size) {
+                val b = bytes[i]
+                if (!starts[b.toInt() and 0xFF]) continue
+                for (p in patterns) if (p[0] == b && matches(bytes, i, p, size)) return true
+            }
+            return false
+        }
+
+        private fun matches(bytes: ByteArray, index: Int, p: ByteArray, size: Int): Boolean {
+            if (index + p.size > size) return false
+            for (j in 1 until p.size) if (bytes[index + j] != p[j]) return false
+            return p[0] == bytes[index]
+        }
+
+        companion object {
+            val FTYP = HdrLabels("ftyp")
+            val HEIF = HdrLabels("tmap", "hdrgainmap")
+            // Google's namespace also covers its "xmlns:hdrgm=" form.
+            val JPEG = HdrLabels(
+                "urn:iso:std:iso:ts:21496:-1",
+                "Item:Semantic=\"GainMap\"",
+                "http://ns.google.com/photos/1.0/gainmap/",
+                "http://ns.adobe.com/hdr-gain-map/1.0/",
+                "hdrgm:Version",
+                "hdrgm:GainMapMin",
+                "hdrgm:GainMapMax"
+            )
+        }
     }
 
     /**

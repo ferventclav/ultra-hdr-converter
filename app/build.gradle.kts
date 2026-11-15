@@ -1,4 +1,4 @@
-﻿plugins {
+plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -12,7 +12,7 @@ android {
         applicationId = "com.example.ultrahdr"
         minSdk = 34 // Android 14+ for native Gainmap & Ultra HDR support
         targetSdk = 35
-        versionCode = 20
+        versionCode = 21
         versionName = "1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -23,7 +23,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Compose runs far slower in a debuggable build, so the APK to install is this one.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            // The same key as every earlier build, so it installs over them and keeps their data.
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -66,6 +70,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.activity:activity-compose:1.9.1")
+    // Installs the compiled-code profiles Compose ships with, so scrolling is smooth from the start.
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
 
     // Jetpack Compose BOM & UI
     // 2024.12.01 = Compose 1.7.6. 1.7 is the first version with GraphicsLayer, which the frosted
