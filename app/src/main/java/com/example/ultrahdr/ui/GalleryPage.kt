@@ -12,6 +12,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -30,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -38,6 +41,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
@@ -54,7 +58,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Deselect
 import androidx.compose.material.icons.outlined.DoneAll
-import androidx.compose.material.icons.outlined.HdrOn
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.DropdownMenu
@@ -62,11 +65,13 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -87,8 +92,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -361,7 +368,8 @@ private fun Header(m: Metrics, look: Look, statusTop: Dp, count: Int, onGooglePh
             color = look.title,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
+            // TalkBack reads the new count as photos are picked, and when Clear empties it.
+            modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }
         )
         var menu by remember { mutableStateOf(false) }
         Box {
@@ -571,7 +579,7 @@ private fun BottomPill(m: Metrics, look: Look, backdrop: GlassBackdrop, count: I
             tint = look.pill,
             blurRadius = 14.dp,
             modifier = Modifier
-                .height(m(56f))
+                .heightIn(min = m(56f))
                 .then(
                     if (look.pillShadow) Modifier.shadow(
                         elevation = 12.dp,
@@ -582,23 +590,26 @@ private fun BottomPill(m: Metrics, look: Look, backdrop: GlassBackdrop, count: I
                     ) else Modifier
                 )
         ) {
-            Row(Modifier.fillMaxHeight().padding(horizontal = m(4f)), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(m(4f)), verticalAlignment = Alignment.CenterVertically) {
                 BarItem(m, look, Icons.Outlined.Close, "Cancel", onClick = actions.close)
+                // A gap either side of Convert, so a thumb aimed at it doesn't land on its neighbours.
+                Spacer(Modifier.width(m(BAR_GAP)))
                 ConvertButton(m, look, count, onClick = actions.convert)
                 if (open > 0f) {
                     Box(
                         Modifier
-                            .width(m(BAR_ITEM) * open)
-                            .fillMaxHeight()
+                            .width(m(BAR_GAP + BAR_ITEM) * open)
                             .clipToBounds()
                             .graphicsLayer { alpha = open },
-                        contentAlignment = Alignment.Center
+                        contentAlignment = Alignment.CenterStart
                     ) {
                         BarItem(
                             m, look, Icons.Outlined.Deselect, "Clear",
                             onClick = actions.clearSelection,
                             enabled = count > 0,
-                            modifier = Modifier.requiredWidth(m(BAR_ITEM))
+                            modifier = Modifier
+                                .wrapContentWidth(Alignment.Start, unbounded = true)
+                                .padding(start = m(BAR_GAP))
                         )
                     }
                 }
@@ -609,8 +620,9 @@ private fun BottomPill(m: Metrics, look: Look, backdrop: GlassBackdrop, count: I
 
 /** Width of Cancel and Clear, a third of Enhance-X's 232 dp bar after its padding. */
 private const val BAR_ITEM = 72f
+private const val BAR_GAP = 4f
 
-/** The bar's button: an icon and a label side by side, larger than the items around it. */
+/** The bar's button: its label alone, larger than the items around it. */
 @Composable
 private fun ConvertButton(m: Metrics, look: Look, count: Int, onClick: () -> Unit) {
     val ready = count > 0
@@ -622,28 +634,39 @@ private fun ConvertButton(m: Metrics, look: Look, count: Int, onClick: () -> Uni
     val color = if (ready) Color.White else look.pillOn
     Row(
         modifier = Modifier
-            .height(m(48f))
+            .heightIn(min = m(48f))
             .widthIn(min = m(112f), max = m(196f))
             .clip(RoundedCornerShape(m(24f)))
             .background(fill)
             .clickable(enabled = ready, role = Role.Button, onClick = onClick)
             // The count changes the label's width; the button eases to it instead of jumping.
             .animateContentSize(tween(200, easing = OneUiEasing))
-            .padding(horizontal = m(18f))
+            .padding(horizontal = m(22f))
             .alpha(if (ready) 1f else 0.5f),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Outlined.HdrOn, contentDescription = null, tint = color, modifier = Modifier.size(m(22f)))
-        Spacer(Modifier.width(m(6f)))
-        Text(
-            text = if (ready) "Convert $count" else "Convert",
-            style = m.text(15f, FontWeight.Bold),
-            color = color,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        // Cut short at the largest font sizes it would read "Convert 1…", a wrong count.
+        FitText(if (ready) "Convert $count" else "Convert", m.text(15f, FontWeight.Bold), color)
     }
+}
+
+/**
+ * One line that steps its size down until it fits, instead of being cut short. At normal font
+ * sizes nothing overflows, so the text stays at the size it was given.
+ */
+@Composable
+private fun FitText(text: String, style: TextStyle, color: Color) {
+    var fit by remember(text, style.fontSize) { mutableFloatStateOf(1f) }
+    Text(
+        text = text,
+        style = style.copy(fontSize = style.fontSize * fit, lineHeight = style.lineHeight * fit),
+        color = color,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
+        onTextLayout = { if (it.didOverflowWidth && fit > 0.55f) fit -= 0.1f }
+    )
 }
 
 /** Cancel and Clear: an icon over a small label, as in Enhance-X's bar. */
@@ -657,24 +680,21 @@ private fun BarItem(
     enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val press = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
             .width(m(BAR_ITEM))
-            .height(m(48f))
-            .clip(RoundedCornerShape(m(24f)))
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+            .heightIn(min = m(48f))
+            .clickable(press, indication = null, enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        // Only the press ripple is rounded. Clipping the item itself would cut the corners off its
+        // label at the largest font sizes, where the label fills the item's full width.
+        Box(Modifier.matchParentSize().clip(RoundedCornerShape(m(24f))).indication(press, ripple()))
+        Column(Modifier.padding(horizontal = m(4f)), horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(icon, contentDescription = null, tint = look.pillOff, modifier = Modifier.size(m(24f)))
             Spacer(Modifier.height(m(2f)))
-            Text(
-                text = label,
-                style = m.text(10f),
-                color = look.pillOff,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            FitText(label, m.text(10f), look.pillOff)
         }
     }
 }

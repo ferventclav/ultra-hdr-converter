@@ -310,6 +310,13 @@ class ScreensTest {
         compose.onNodeWithText("Convert 3").assertIsDisplayed()
     }
 
+    /** The largest font size with a three-digit count: the label shrinks to fit, never cut short. */
+    @Test
+    fun galleryHugeText() = galleryScreen("38_gallery_huge_text", galleryState(selected = (1L..128L).toSet()), dark = true, fontScale = 2f) {
+        compose.onNodeWithText("Convert 128").assertIsDisplayed()
+        compose.onNodeWithText("128 selected").assertIsDisplayed()
+    }
+
     /** The Galaxy S25 at its default display size, to set beside an Enhance-X screenshot. */
     @Test
     @Config(qualifiers = "w384dp-h832dp-xxhdpi")
