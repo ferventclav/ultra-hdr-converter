@@ -58,24 +58,6 @@ data class ConvertOptions(
     val redo: Boolean = false
 )
 
-/** What the app saw while handling one photo. Only used for the Copy report. */
-data class Trace(
-    /** picker, media, file, or the provider of the app that shared the photo. */
-    val source: String = "",
-    val realFileFound: Boolean = false,
-    /** "real file" or "picked copy". */
-    val bytesFrom: String = "",
-    /** Which HDR checks said yes: queue, markers, decoder, layout. */
-    val hdrChecks: List<String> = emptyList(),
-    val sizeBefore: Long = -1,
-    val sizeAfter: Long = -1,
-    /** What the photo's metadata held when it arrived, and in the finished file: date, camera, gps. */
-    val metadataBefore: String = "",
-    val metadataAfter: String = "",
-    /** "kept" when the gain map went behind the untouched picture, "saved again" when it was re-encoded. */
-    val picture: String = ""
-)
-
 data class PhotoResult(
     val uri: Uri,
     val name: String,
@@ -86,8 +68,7 @@ data class PhotoResult(
     val keptOriginalPixels: Boolean = false,
     /** Plain-language reason: why it was copied, skipped or failed. */
     val note: String? = null,
-    val peakBoost: Float = 1f,
-    val trace: Trace = Trace()
+    val peakBoost: Float = 1f
 ) {
     val converted: Boolean get() = outcome == Outcome.UPDATED || outcome == Outcome.COPIED
 }

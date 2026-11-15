@@ -16,6 +16,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.DeviceFontFamilyName
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -53,10 +56,39 @@ private val OneUiLightColorScheme = lightColorScheme(
 )
 
 /**
- * One UI's type scale, in the system font (One UI Sans on a Galaxy), as the Knowledge app uses it:
- * a 36sp bold enlarged header, 20sp bold titles, 18sp row titles, 14sp supporting text.
+ * One UI Sans. Galaxy phones ship it as the font family "sec", which Samsung's own apps use;
+ * Android's default font there is Roboto. On other phones there is no "sec", so text falls back to
+ * the phone's default font.
  */
-private val UhdrTypography = Typography(
+internal val OneUiSans = FontFamily(
+    listOf(FontWeight.Light, FontWeight.Normal, FontWeight.Medium, FontWeight.SemiBold, FontWeight.Bold)
+        .map { Font(DeviceFontFamilyName("sec"), it) }
+)
+
+/** Every style in [OneUiSans], including the ones the app doesn't set, so no text is left in Roboto. */
+private fun Typography.inOneUiSans(): Typography = Typography(
+    displayLarge = displayLarge.copy(fontFamily = OneUiSans),
+    displayMedium = displayMedium.copy(fontFamily = OneUiSans),
+    displaySmall = displaySmall.copy(fontFamily = OneUiSans),
+    headlineLarge = headlineLarge.copy(fontFamily = OneUiSans),
+    headlineMedium = headlineMedium.copy(fontFamily = OneUiSans),
+    headlineSmall = headlineSmall.copy(fontFamily = OneUiSans),
+    titleLarge = titleLarge.copy(fontFamily = OneUiSans),
+    titleMedium = titleMedium.copy(fontFamily = OneUiSans),
+    titleSmall = titleSmall.copy(fontFamily = OneUiSans),
+    bodyLarge = bodyLarge.copy(fontFamily = OneUiSans),
+    bodyMedium = bodyMedium.copy(fontFamily = OneUiSans),
+    bodySmall = bodySmall.copy(fontFamily = OneUiSans),
+    labelLarge = labelLarge.copy(fontFamily = OneUiSans),
+    labelMedium = labelMedium.copy(fontFamily = OneUiSans),
+    labelSmall = labelSmall.copy(fontFamily = OneUiSans)
+)
+
+/**
+ * One UI's type scale, as the Knowledge app uses it: a 36sp bold enlarged header, 20sp bold titles,
+ * 18sp row titles, 14sp supporting text.
+ */
+internal val UhdrTypography = Typography(
     // Enlarged header title.
     displaySmall = TextStyle(fontSize = 36.sp, lineHeight = 41.sp, fontWeight = FontWeight.Bold),
     // Collapsed app bar title, dialog titles.
@@ -75,7 +107,7 @@ private val UhdrTypography = Typography(
     labelMedium = TextStyle(fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold),
     // Chips on photos.
     labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold)
-)
+).inOneUiSans()
 
 /** The One UI corner is 28dp on every card, row group and dialog. Photo tiles use 14dp. */
 private val UhdrShapes = Shapes(

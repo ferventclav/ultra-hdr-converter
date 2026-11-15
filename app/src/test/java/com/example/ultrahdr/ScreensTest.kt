@@ -15,7 +15,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -24,6 +27,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onAllNodesWithText
@@ -61,6 +66,7 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import android.view.accessibility.AccessibilityManager
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.robolectric.Shadows.shadowOf
 import org.junit.Rule
 import org.junit.Test
@@ -99,10 +105,59 @@ class ScreensTest {
     @Test
     fun startDark() = screen("01_start_dark", UiState(updatesWithoutAsking = true), dark = true)
 
+    /** What Undo did is the status line, well below the top bar's fade, not a card under it. */
     @Test
-    fun startWithPromptsOn() = screen("01_start_prompts_on", UiState()) {
+    fun startAfterUndo() = screen(
+        "01_start_after_undo",
+        UiState(updatesWithoutAsking = true, notice = Notice("5 original photos were put back as they were.", isError = false)),
+        dark = true
+    ) {
+        val line = compose.onNodeWithText("5 original photos were put back as they were.").assertIsDisplayed()
+        // The top bar is the status bar plus 66dp; the old card sat at 12dp, under it.
+        assertTrue(line.getUnclippedBoundsInRoot().top >= 120.dp)
+        compose.onNodeWithText("No photos selected.").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Dismiss").assertDoesNotExist()
+    }
+
+    @Test
+    fun startAfterUndoFailed() = screen(
+        "01_start_after_undo_failed",
+        UiState(notice = Notice("4 original photos were put back as they were. 1 couldn't be undone.", isError = true))
+    ) {
+        compose.onNodeWithText("4 original photos were put back as they were. 1 couldn't be undone.").assertIsDisplayed()
         compose.onNodeWithText("Stop edit prompts").assertIsDisplayed()
     }
+
+    @Test
+    fun startWithPromptsOn() = screen("01_start_prompts_on", UiState()) {
+        compose.onNodeWithText("Stop edit prompts").assertIsDisplayed().assertHasClickAction()
+    }
+
+    /** The header buttons are drawn 40dp tall but take taps up to 48dp, the size Android asks for. */
+    @Test
+    fun headerButtonsTakeTapsJustOutsideThem() {
+        var undone = 0
+        var prompts = 0
+        var state by mutableStateOf(finishedState)
+        compose.setContent {
+            UltraHdrTheme {
+                UltraHdrScreen(
+                    state = state,
+                    actions = ScreenActions(undo = { undone++ }, turnOnMediaManagement = { prompts++ }),
+                    thumbnail = painted
+                )
+            }
+        }
+        compose.onNodeWithText("Undo").performTouchInput { click(Offset(centerX, top - 3.dp.toPx())) }
+        assertEquals(1, undone)
+        state = UiState()
+        compose.waitForIdle()
+        compose.onNodeWithText("Stop edit prompts").performTouchInput { click(Offset(centerX, bottom + 3.dp.toPx())) }
+        assertEquals(1, prompts)
+    }
+
+    @Test
+    fun startWithPromptsOnDark() = screen("01_start_prompts_on_dark", UiState(), dark = true)
 
     @Test
     fun preparing() = screen(
@@ -153,7 +208,38 @@ class ScreensTest {
     fun finished() = screen("20_finished", finishedState) {
         compose.onNodeWithText("Open Gallery").assertIsDisplayed()
         compose.onNodeWithText("5 photos are now HDR").assertIsDisplayed()
-        compose.onNodeWithText("Undo").assertIsDisplayed()
+        // Undo is the header's small button, under the title.
+        compose.onNodeWithText("Undo").assertIsDisplayed().assertHasClickAction()
+        val titleBottom = compose.onNodeWithText("5 photos are now HDR").getUnclippedBoundsInRoot().bottom
+        assertTrue(compose.onNodeWithText("Undo").getUnclippedBoundsInRoot().top >= titleBottom)
+        compose.onNodeWithText("Copy report").assertDoesNotExist()
+    }
+
+    /** Nothing to put back, so the header has no Undo. */
+    @Test
+    fun finishedWithoutUndo() = screen("20_finished_no_undo", finishedState.copy(canUndo = false)) {
+        compose.onNodeWithText("Undo").assertDoesNotExist()
+    }
+
+    /** One tap on Undo starts it; a tap on the button fading out after that does nothing. */
+    @Test
+    fun undoInTheHeaderActsOnce() {
+        var undone = 0
+        var state by mutableStateOf(finishedState)
+        compose.setContent {
+            UltraHdrTheme {
+                UltraHdrScreen(state = state, actions = ScreenActions(undo = { undone++ }), thumbnail = painted)
+            }
+        }
+        compose.onNodeWithText("Undo").performClick()
+        assertEquals(1, undone)
+        compose.mainClock.autoAdvance = false
+        state = state.copy(phase = Phase.Undoing)
+        compose.mainClock.advanceTimeByFrame()
+        assertTrue("the old heading is still fading out", compose.onAllNodesWithText("Undo").fetchSemanticsNodes().isNotEmpty())
+        compose.onAllNodesWithText("Undo")[0].performClick()
+        compose.mainClock.advanceTimeBy(32)
+        assertEquals(1, undone)
     }
 
     @Test

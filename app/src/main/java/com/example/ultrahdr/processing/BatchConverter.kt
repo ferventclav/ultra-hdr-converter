@@ -49,12 +49,12 @@ class BatchConverter(
         val out = File(workDir, "out_$stamp.jpg")
         val staged = File(workDir, "in_$stamp")
         val target = item.target
-        var trace = Trace(source = MediaStoreSaver.sourceOf(item.uri), realFileFound = target != null)
+        val source = MediaStoreSaver.sourceOf(item.uri)
 
         fun result(outcome: Outcome, note: String? = null, output: Uri? = null, peak: Float = 1f, kept: Boolean = false) =
             PhotoResult(
                 item.uri, item.name, outcome, output = output, keptOriginalPixels = kept,
-                note = note, peakBoost = peak, trace = trace
+                note = note, peakBoost = peak
             )
 
         try {
@@ -63,18 +63,13 @@ class BatchConverter(
                 MediaStoreSaver.readOriginal(context, item.uri, target)
             } ?: return@withContext result(Outcome.FAILED, "Couldn't open this photo.")
             var bytes = original.bytes
-            trace = trace.copy(
-                bytesFrom = if (original.fromTarget) "real file" else "picked copy",
-                sizeBefore = bytes.size.toLong(),
-                metadataBefore = ImageExifHelper.metadataKinds(bytes)
-            )
+            val metadataBefore = ImageExifHelper.metadataKinds(bytes)
 
             // 1. HDR already? Checked when the photo was queued and again here, on the bytes in hand.
             val checks = buildList {
                 if (item.alreadyHdr) add("queue")
                 addAll(UltraHdrEngine.hdrChecks(bytes))
             }
-            trace = trace.copy(hdrChecks = checks)
             if (checks.isNotEmpty()) {
                 val stripped = UltraHdrContainer.strip(bytes)
                     ?: return@withContext result(Outcome.ALREADY_HDR, PLAIN_HDR_NOTE)
@@ -156,11 +151,6 @@ class BatchConverter(
                 }
                 made = Made(encoded.plan.peakBoost, kept = false, downsized = encoded.downsized)
             }
-            trace = trace.copy(
-                sizeAfter = out.length(),
-                metadataAfter = ImageExifHelper.metadataKinds(out),
-                picture = if (made.kept) "kept" else "saved again"
-            )
             val peak = made.peak
             val takenAt = ImageExifHelper.getCaptureTimestamp(bytes) ?: item.takenAt
 
@@ -195,10 +185,10 @@ class BatchConverter(
             if (saved.isNew) runCatching { UndoStore.keepCopy(context, saved.uri) }
             // Google Photos hands out a cloud photo it hasn't downloaded as a small copy with no
             // camera details. Nothing in the app can fetch the original, so say how to get it.
-            val fromGoogle = trace.source == "picker" || trace.source.startsWith("com.google.android.apps.photos")
+            val fromGoogle = source == "picker" || source.startsWith("com.google.android.apps.photos")
             val note = listOfNotNull(
                 "Cloud photo, so an HDR copy was saved.".takeIf { isCloud && options.replaceOriginal },
-                SMALL_CLOUD_COPY.takeIf { isCloud && fromGoogle && "camera" !in trace.metadataBefore },
+                SMALL_CLOUD_COPY.takeIf { isCloud && fromGoogle && "camera" !in metadataBefore },
                 "Saved at a lower resolution.".takeIf { made.downsized }
             ).joinToString(" ").ifEmpty { null }
             result(Outcome.COPIED, note, output = saved.uri, peak = peak, kept = made.kept)

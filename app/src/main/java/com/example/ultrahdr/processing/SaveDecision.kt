@@ -50,28 +50,3 @@ object SaveDecision {
 
     const val TOO_LARGE = "Too large to save again safely, so it wasn't changed."
 }
-
-/** Plain text for the clipboard: one header line, then one line per photo. */
-object CopyReport {
-
-    fun build(header: String, results: List<PhotoResult>): String =
-        (listOf(header) + results.map { line(it) }).joinToString("\n")
-
-    fun line(r: PhotoResult): String {
-        val t = r.trace
-        return listOf(
-            r.name,
-            r.outcome.name.lowercase(),
-            r.note ?: "-",
-            "from ${t.source.ifEmpty { "?" }}",
-            "real file ${if (t.realFileFound) "found" else "not found"}",
-            "bytes ${t.bytesFrom.ifEmpty { "-" }}",
-            "hdr checks ${t.hdrChecks.joinToString("+").ifEmpty { "none" }}",
-            "picture ${t.picture.ifEmpty { "-" }}",
-            "size ${size(t.sizeBefore)} -> ${size(t.sizeAfter)}",
-            "metadata ${t.metadataBefore.ifEmpty { "-" }} -> ${t.metadataAfter.ifEmpty { "-" }}"
-        ).joinToString(" | ")
-    }
-
-    private fun size(bytes: Long) = if (bytes < 0) "-" else bytes.toString()
-}

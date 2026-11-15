@@ -216,7 +216,7 @@ internal object UltraHdrEngine {
     }
 
     /**
-     * Every already-HDR check, each named, for skipping and for the Copy report: "markers" (the
+     * Every already-HDR check, each named, for skipping: "markers" (the
      * labels anywhere in the file), "decoder" (the phone's decoder) and "layout" (the file holds a
      * second picture described as a gain map). Empty when none of them fires.
      */

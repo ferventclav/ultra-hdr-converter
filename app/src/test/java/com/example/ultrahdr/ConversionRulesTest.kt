@@ -3,7 +3,6 @@ package com.example.ultrahdr
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
-import com.example.ultrahdr.processing.CopyReport
 import com.example.ultrahdr.processing.HdrStrength
 import com.example.ultrahdr.processing.ImageExifHelper
 import com.example.ultrahdr.processing.MediaStoreSaver
@@ -12,7 +11,6 @@ import com.example.ultrahdr.processing.PhotoResult
 import com.example.ultrahdr.processing.SaveDecision
 import com.example.ultrahdr.processing.SaveFacts
 import com.example.ultrahdr.processing.SavePlan
-import com.example.ultrahdr.processing.Trace
 import com.example.ultrahdr.processing.UltraHdrContainer
 import com.example.ultrahdr.processing.UltraHdrEngine
 import org.junit.Assert.assertArrayEquals
@@ -349,7 +347,7 @@ class ConversionRulesTest {
     }
 
     // ---------------------------------------------------------------------------------------
-    // Finding the photo, and the Copy report
+    // Finding the photo
     // ---------------------------------------------------------------------------------------
 
     @Test
@@ -366,28 +364,6 @@ class ConversionRulesTest {
         assertEquals("media", MediaStoreSaver.sourceOf(Uri.parse("content://media/external/images/media/10866")))
         assertEquals("file", MediaStoreSaver.sourceOf(Uri.parse("file:///sdcard/DCIM/Camera/a.jpg")))
         assertEquals("com.sec.android.gallery3d.provider", MediaStoreSaver.sourceOf(Uri.parse("content://com.sec.android.gallery3d.provider/picker/item/1")))
-    }
-
-    @Test
-    fun reportHasOneLinePerPhotoWithEverythingNeededToDebug() {
-        val result = PhotoResult(
-            uri = Uri.parse("content://media/external/images/media/1"),
-            name = "20261114_190629.jpg",
-            outcome = Outcome.ALREADY_HDR,
-            note = "Already HDR, left as it is.",
-            trace = Trace(
-                "picker", true, "real file", listOf("queue", "markers", "decoder"), 7_684_869, -1,
-                metadataBefore = "date+camera+gps"
-            )
-        )
-        val text = CopyReport.build("Ultra HDR Converter 2.1 (12)", listOf(result))
-        val lines = text.lines()
-        assertEquals(2, lines.size)
-        assertEquals(
-            "20261114_190629.jpg | already_hdr | Already HDR, left as it is. | from picker | real file found | " +
-                "bytes real file | hdr checks queue+markers+decoder | picture - | size 7684869 -> - | metadata date+camera+gps -> -",
-            lines[1]
-        )
     }
 
     // ---------------------------------------------------------------------------------------

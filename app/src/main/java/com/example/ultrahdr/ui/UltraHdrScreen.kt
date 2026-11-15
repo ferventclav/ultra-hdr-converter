@@ -75,6 +75,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -88,7 +89,9 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -112,7 +115,6 @@ class ScreenActions(
     val dismissNotice: () -> Unit = {},
     val turnOnMediaManagement: () -> Unit = {},
     val notNow: () -> Unit = {},
-    val copyReport: () -> Unit = {},
     val undo: () -> Unit = {},
     val openResult: (PhotoResult) -> Unit = {},
     /** The bar's Gallery button, for every photo that was converted. */
@@ -141,11 +143,6 @@ fun UltraHdrApp(viewModel: UltraHdrViewModel) {
             turnOnMediaManagement = viewModel::openMediaManagement,
             notNow = viewModel::notNow,
             undo = viewModel::undo,
-            copyReport = {
-                context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
-                    android.content.ClipData.newPlainText("Ultra HDR report", viewModel.copyReport())
-                )
-            },
             openResult = { result -> openInGallery(context, result.viewableUri()) },
             openConverted = { openConvertedPhotos(context, viewModel.state.value.results.values) }
         )
@@ -346,8 +343,12 @@ fun UltraHdrScreen(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                if (!empty) wide("header") { ExpandedHeader(heading, headerHeight, screenWidth) }
-                state.notice?.let { notice -> wide("notice") { NoticeCard(notice, actions.dismissNotice) } }
+                if (!empty) {
+                    val undo = actions.undo.takeIf { state.phase is Phase.Finished && state.canUndo }
+                    wide("header") { ExpandedHeader(heading, headerHeight, screenWidth, undo) }
+                    // On the empty screen the notice is the status line instead, clear of the top bar.
+                    state.notice?.let { notice -> wide("notice") { NoticeCard(notice, actions.dismissNotice) } }
+                }
                 if (empty) {
                     emptyState(state, actions, emptyHeight, screenWidth)
                 } else {
@@ -386,21 +387,26 @@ private fun LazyGridScope.wide(key: String, content: @Composable () -> Unit) {
     item(key = key, span = { GridItemSpan(maxLineSpan) }) { content() }
 }
 
-/** One UI's enlarged header: a big centred title low in the top third, one info line under it. */
+/**
+ * One UI's enlarged header: a big centred title low in the top third, one info line under it, and
+ * its small button when there is something to undo.
+ */
 @Composable
-private fun ExpandedHeader(words: Heading, height: Dp, screenWidth: Dp) {
+private fun ExpandedHeader(words: Heading, height: Dp, screenWidth: Dp, undo: (() -> Unit)?) {
     // Scales down on narrow screens, the way the Knowledge app's clamp(28px, 8.8vw, 36px) does.
     val titleSize = (screenWidth.value * 0.088f).coerceIn(28f, 36f).sp
+    // A button fading out with the old heading must not act again once Undo has started.
+    val currentUndo by rememberUpdatedState(undo)
     Column(
         modifier = Modifier.fillMaxWidth().height(height).padding(start = 12.dp, end = 12.dp, bottom = 30.dp),
         verticalArrangement = Arrangement.Bottom,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         AnimatedContent(
-            targetState = words,
+            targetState = words to (undo != null),
             transitionSpec = { fadeIn(tween(240, easing = OneUiEasing)) togetherWith fadeOut(tween(120)) },
             label = "heading"
-        ) { shown ->
+        ) { (shown, offersUndo) ->
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = shown.title,
@@ -418,6 +424,10 @@ private fun ExpandedHeader(words: Heading, height: Dp, screenWidth: Dp) {
                         textAlign = TextAlign.Center,
                         modifier = Modifier.widthIn(max = 320.dp)
                     )
+                }
+                if (offersUndo) {
+                    Spacer(Modifier.height(10.dp))
+                    HeaderButton("Undo", onClick = { currentUndo?.invoke() })
                 }
             }
         }
@@ -478,8 +488,10 @@ private fun NoticeCard(notice: Notice, onDismiss: () -> Unit) {
 
 /**
  * Built like One UI 9's Software update page: the app's name large in the accent colour in the
- * middle of the screen, one status line under it, and a soft blue and amber light behind. The only
- * extra is a way back to media management, and only while it is off.
+ * middle of the screen, one status line under it, and a soft blue and amber light behind. The
+ * status line also carries the last notice, such as what Undo put back, since a card at the top
+ * would sit under the top bar's fade. The only extra is a way back to media management, and only
+ * while it is off.
  */
 private fun LazyGridScope.emptyState(state: UiState, actions: ScreenActions, height: Dp, screenWidth: Dp) {
     wide("empty") {
@@ -502,15 +514,18 @@ private fun LazyGridScope.emptyState(state: UiState, actions: ScreenActions, hei
                 modifier = Modifier.semantics { heading() }
             )
             Spacer(Modifier.height(4.dp))
+            val notice = state.notice
             Text(
-                text = "No photos selected.",
+                text = notice?.text ?: "No photos selected.",
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
-                textAlign = TextAlign.Center
+                color = if (notice?.isError == true) UhdrTheme.colors.danger else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
+                textAlign = TextAlign.Center,
+                // Read out when it changes, so TalkBack hears what Undo did.
+                modifier = Modifier.widthIn(max = 340.dp).semantics { liveRegion = LiveRegionMode.Polite }
             )
             if (!state.updatesWithoutAsking) {
-                Spacer(Modifier.height(24.dp))
-                TonalButton(text = "Stop edit prompts", onClick = actions.turnOnMediaManagement, height = 44.dp)
+                Spacer(Modifier.height(20.dp))
+                HeaderButton(text = "Stop edit prompts", onClick = actions.turnOnMediaManagement)
             }
         }
     }
@@ -550,11 +565,7 @@ private fun LazyGridScope.photoPage(state: UiState, actions: ScreenActions, thum
     val phase = state.phase
     if (phase is Phase.Finished) {
         wide("summary") {
-            SummaryCard(
-                summarize(state.results.values, state.photos.size, phase.stopped),
-                actions.copyReport,
-                onUndo = actions.undo.takeIf { state.canUndo }
-            )
+            SummaryCard(summarize(state.results.values, state.photos.size, phase.stopped))
         }
     }
     items(state.photos, key = { it.uri.toString() }) { item ->
@@ -575,9 +586,8 @@ private fun LazyGridScope.photoPage(state: UiState, actions: ScreenActions, thum
     }
 }
 
-/** [onUndo] is null when the batch changed nothing that can be put back. */
 @Composable
-private fun SummaryCard(summary: Summary, onCopyReport: () -> Unit, onUndo: (() -> Unit)?) {
+private fun SummaryCard(summary: Summary) {
     OneUiCard(Modifier.padding(bottom = 8.dp)) {
         Spacer(Modifier.height(6.dp))
         summary.lines.forEachIndexed { index, line ->
@@ -600,13 +610,7 @@ private fun SummaryCard(summary: Summary, onCopyReport: () -> Unit, onUndo: (() 
                 }
             }
         }
-        Row(
-            Modifier.padding(start = CardPadding, end = CardPadding, top = 4.dp, bottom = CardPadding),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (onUndo != null) TonalButton(text = "Undo", onClick = onUndo, height = 40.dp)
-            TonalButton(text = "Copy report", onClick = onCopyReport, height = 40.dp)
-        }
+        Spacer(Modifier.height(6.dp))
     }
 }
 
@@ -661,7 +665,7 @@ private fun BottomBar(state: UiState, actions: ScreenActions, backdrop: GlassBac
                             BarMode.PICK -> PrimaryButton("Select photos", actions.pickPhotos, Modifier.fillMaxWidth(), icon = Icons.Rounded.AddPhotoAlternate)
                             BarMode.PREPARING -> ProgressRow("Getting photos ready", null, "Cancel", actions.clearPhotos, warns = false)
                             BarMode.RETRY -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                TonalButton("Cancel", actions.clearPhotos)
+                                SecondaryButton("Cancel", actions.clearPhotos)
                                 PrimaryButton("Try again", actions.tryAgain, Modifier.weight(1f))
                             }
                             BarMode.WORKING -> {
@@ -678,7 +682,7 @@ private fun BottomBar(state: UiState, actions: ScreenActions, backdrop: GlassBac
                             BarMode.UNDOING -> ProgressRow("Putting photos back", null, null, {})
                             // "Done" takes only the room it needs, so the longer label never gets cut off.
                             BarMode.OPEN -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                TonalButton("Done", actions.done)
+                                SecondaryButton("Done", actions.done)
                                 PrimaryButton(galleryButtonLabel(state.results.values), actions.openConverted, Modifier.weight(1f))
                             }
                             BarMode.DONE -> PrimaryButton("Done", actions.done, Modifier.fillMaxWidth())
@@ -727,7 +731,7 @@ private fun ProgressRow(label: String, progress: Float?, action: String?, onActi
         }
         if (action != null) {
             Spacer(Modifier.width(14.dp))
-            TonalButton(action, onAction, height = 52.dp, textColor = if (warns) UhdrTheme.colors.danger else UhdrTheme.colors.accentInk)
+            SecondaryButton(action, onAction, textColor = if (warns) UhdrTheme.colors.danger else MaterialTheme.colorScheme.onSurface)
         }
     }
 }

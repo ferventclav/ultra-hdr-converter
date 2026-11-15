@@ -200,7 +200,7 @@ object ImageExifHelper {
         null
     }
 
-    /** Which kinds of metadata a photo carries, for the Copy report: "date+camera+gps", or "none". */
+    /** Which kinds of metadata a photo carries: "date+camera+gps", or "none". */
     fun metadataKinds(bytes: ByteArray): String = try {
         metadataKinds(ExifInterface(ByteArrayInputStream(bytes)))
     } catch (e: Exception) {

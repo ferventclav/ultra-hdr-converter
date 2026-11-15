@@ -115,7 +115,7 @@ object MediaStoreSaver {
         Regex("""content://media/[a-z0-9_]+/images/media/(\d+)""")
             .find(Uri.decode(uri))?.groupValues?.get(1)?.toLongOrNull()
 
-    /** Where a picked photo's address came from, for the Copy report. */
+    /** Where a picked photo's address came from: picker, media, file, or the sharing app's provider. */
     fun sourceOf(uri: Uri): String = when {
         uri.scheme == "file" -> "file"
         uri.authority == MediaStore.AUTHORITY && uri.path.orEmpty().contains("/picker") -> "picker"

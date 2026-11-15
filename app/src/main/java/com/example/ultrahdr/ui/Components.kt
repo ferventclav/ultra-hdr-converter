@@ -33,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -169,26 +170,50 @@ fun PrimaryButton(
     }
 }
 
-/** The quieter button: blue text on a pale blue tint. */
+/**
+ * The neutral button beside the accent one in the floating toolbar: text colour on the quiet
+ * `component` fill, which the system uses for fills inside bars.
+ */
 @Composable
-fun TonalButton(
+fun SecondaryButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     height: Dp = 52.dp,
-    textColor: Color = UhdrTheme.colors.accentInk
+    textColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
     val interaction = remember { MutableInteractionSource() }
     Button(
         onClick = onClick,
         shape = CircleShape,
-        colors = ButtonDefaults.buttonColors(containerColor = UhdrTheme.colors.accentTint, contentColor = textColor),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = textColor),
         contentPadding = PaddingValues(horizontal = 22.dp),
         interactionSource = interaction,
         elevation = null,
         modifier = modifier.height(height).pressScale(interaction)
     ) {
         Text(text, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * The small button of One UI's enlarged header: a 14sp label on the container colour, 40dp tall.
+ * Taps up to 48dp around it still count, as Compose widens small touch targets.
+ */
+@Composable
+fun HeaderButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val interaction = remember { MutableInteractionSource() }
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        interactionSource = interaction,
+        modifier = modifier.pressScale(interaction)
+    ) {
+        Box(Modifier.heightIn(min = 40.dp).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+            Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 

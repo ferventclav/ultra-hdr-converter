@@ -14,7 +14,6 @@ import androidx.lifecycle.viewModelScope
 import com.example.ultrahdr.ConversionService
 import com.example.ultrahdr.processing.BatchConverter
 import com.example.ultrahdr.processing.ConvertOptions
-import com.example.ultrahdr.processing.CopyReport
 import com.example.ultrahdr.processing.HdrStrength
 import com.example.ultrahdr.processing.ImageExifHelper
 import com.example.ultrahdr.processing.LocalPhoto
@@ -477,20 +476,6 @@ class UltraHdrViewModel(application: Application) : AndroidViewModel(application
 
     fun dismissNotice() {
         _state.update { it.copy(notice = null) }
-    }
-
-    /** Plain text for the clipboard: what happened to each photo and why. */
-    fun copyReport(): String {
-        val s = _state.value
-        val version = runCatching {
-            val info = context.packageManager.getPackageInfo(context.packageName, 0)
-            "${info.versionName} (${info.longVersionCode})"
-        }.getOrDefault("?")
-        val header = "Ultra HDR Converter $version | ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} | " +
-            "Android ${android.os.Build.VERSION.RELEASE} | automatic | " +
-            "media management ${if (s.updatesWithoutAsking) "on" else "off"}"
-        val ordered = s.photos.mapNotNull { s.results[it.uri] }
-        return CopyReport.build(header, ordered)
     }
 
     private fun photos(count: Int) = if (count == 1) "1 original photo was" else "$count original photos were"
