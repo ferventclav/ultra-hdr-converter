@@ -115,7 +115,8 @@ class ScreenActions(
     val copyReport: () -> Unit = {},
     val undo: () -> Unit = {},
     val openResult: (PhotoResult) -> Unit = {},
-    val openFirstResult: () -> Unit = {}
+    /** The bar's Gallery button, for every photo that was converted. */
+    val openConverted: () -> Unit = {}
 )
 
 /** The app: the screen wired to the view model, the photo picker and the window. */
@@ -146,10 +147,7 @@ fun UltraHdrApp(viewModel: UltraHdrViewModel) {
                 )
             },
             openResult = { result -> openInGallery(context, result.viewableUri()) },
-            openFirstResult = {
-                viewModel.state.value.results.values.firstOrNull { it.converted && it.output != null }
-                    ?.let { openInGallery(context, it.viewableUri()) }
-            }
+            openConverted = { openConvertedPhotos(context, viewModel.state.value.results.values) }
         )
     }
 
@@ -218,6 +216,28 @@ private fun Context.findActivity(): Activity? {
  */
 private fun PhotoResult.viewableUri(): Uri = output?.takeIf { it.scheme == "content" } ?: uri
 
+private const val SAMSUNG_GALLERY = "com.sec.android.gallery3d"
+
+/** A converted photo another app can be pointed at. */
+private val PhotoResult.openable: Boolean get() = converted && output != null
+
+/**
+ * What the bar's open button says. A photo viewer is handed one photo at a time, so with
+ * several converted the button opens Gallery itself rather than one photo out of the set.
+ */
+internal fun galleryButtonLabel(results: Collection<PhotoResult>): String =
+    if (results.count { it.openable } > 1) "Open Gallery" else "Open photo"
+
+/** The bar's open button: one converted photo opens in Gallery, several open Gallery. */
+internal fun openConvertedPhotos(context: Context, results: Collection<PhotoResult>) {
+    val openable = results.filter { it.openable }
+    when {
+        openable.size == 1 -> openInGallery(context, openable.single().viewableUri())
+        // With no gallery app to open, showing one of the photos still beats doing nothing.
+        openable.size > 1 -> if (!openGalleryApp(context)) openInGallery(context, openable.first().viewableUri())
+    }
+}
+
 /** Opens the photo in Samsung Gallery when it is there, in any photo viewer otherwise. */
 private fun openInGallery(context: Context, uri: Uri) {
     fun view(packageName: String?) = Intent(Intent.ACTION_VIEW).apply {
@@ -225,13 +245,28 @@ private fun openInGallery(context: Context, uri: Uri) {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         if (packageName != null) setPackage(packageName)
     }
+    context.startFirst(view(SAMSUNG_GALLERY), view(null))
+}
+
+/**
+ * Opens Samsung Gallery, or the phone's own gallery app on other phones, the way its home screen
+ * icon does. False when neither opens.
+ */
+private fun openGalleryApp(context: Context): Boolean {
+    val likeTheIcon = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+    return context.startFirst(
+        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(SAMSUNG_GALLERY).addFlags(likeTheIcon),
+        Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_GALLERY).addFlags(likeTheIcon)
+    )
+}
+
+/** Starts the first of [intents] that some app on the phone can take. False when none can. */
+private fun Context.startFirst(vararg intents: Intent): Boolean = intents.any { intent ->
     try {
-        context.startActivity(view("com.sec.android.gallery3d"))
+        startActivity(intent)
+        true
     } catch (_: Exception) {
-        try {
-            context.startActivity(view(null))
-        } catch (_: Exception) {
-        }
+        false
     }
 }
 
@@ -588,7 +623,7 @@ private fun BottomBar(state: UiState, actions: ScreenActions, backdrop: GlassBac
         Phase.Preparing -> BarMode.PREPARING
         is Phase.Working -> BarMode.WORKING
         Phase.Undoing -> BarMode.UNDOING
-        is Phase.Finished -> if (state.results.values.any { it.converted && it.output != null }) BarMode.OPEN else BarMode.DONE
+        is Phase.Finished -> if (state.results.values.any { it.openable }) BarMode.OPEN else BarMode.DONE
     }
     Box(modifier.fillMaxWidth()) {
         // The page melts into its own colour under the toolbar, as it does under the app bar.
@@ -644,7 +679,7 @@ private fun BottomBar(state: UiState, actions: ScreenActions, backdrop: GlassBac
                             // "Done" takes only the room it needs, so the longer label never gets cut off.
                             BarMode.OPEN -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 TonalButton("Done", actions.done)
-                                PrimaryButton("Open in Gallery", actions.openFirstResult, Modifier.weight(1f))
+                                PrimaryButton(galleryButtonLabel(state.results.values), actions.openConverted, Modifier.weight(1f))
                             }
                             BarMode.DONE -> PrimaryButton("Done", actions.done, Modifier.fillMaxWidth())
                         }

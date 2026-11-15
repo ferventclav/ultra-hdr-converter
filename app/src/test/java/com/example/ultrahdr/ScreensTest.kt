@@ -151,13 +151,29 @@ class ScreensTest {
 
     @Test
     fun finished() = screen("20_finished", finishedState) {
-        compose.onNodeWithText("Open in Gallery").assertIsDisplayed()
+        compose.onNodeWithText("Open Gallery").assertIsDisplayed()
         compose.onNodeWithText("5 photos are now HDR").assertIsDisplayed()
         compose.onNodeWithText("Undo").assertIsDisplayed()
     }
 
     @Test
     fun finishedDark() = screen("20_finished_dark", finishedState, dark = true)
+
+    @Test
+    fun finishedSingle() = screen(
+        "20_finished_single",
+        UiState(photos = listOf(photo(0)), results = mapOf(uri(0) to updated(0)), phase = Phase.Finished(stopped = false), canUndo = true)
+    ) {
+        compose.onNodeWithText("Open photo").assertIsDisplayed()
+        compose.onNodeWithText("Open Gallery").assertDoesNotExist()
+    }
+
+    @Test
+    fun finishedSingleDark() = screen(
+        "20_finished_single_dark",
+        UiState(photos = listOf(photo(0)), results = mapOf(uri(0) to updated(0)), phase = Phase.Finished(stopped = false), canUndo = true),
+        dark = true
+    )
 
     @Test
     @Config(sdk = [34], qualifiers = TALL)
